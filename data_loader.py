@@ -2,16 +2,17 @@ import numpy as np
 import pandas as pd
 import os
 import pickle
+import tensorflow as tf
+import global_flags
 
-from absl import app, flags
+from absl import app
 from tqdm import tqdm
 from sklearn.preprocessing import OneHotEncoder, minmax_scale
 
-flags.DEFINE_string('m5dir', './data/m5', 'Path to the m5 data directory')
-
-flags = flags.FLAGS
+flags = global_flags.FLAGS
 
 NUM_TIME_STEPS = 1941  # Starts from 1
+
 
 class M5Data:
     def __init__(self):
@@ -61,10 +62,35 @@ class M5Data:
 
             self.feats = np.concatenate([feats_1, feats_2], axis=1)
             self.feats = self.feats.astype(np.float32)
+            self.feats = self.feats.T
 
             with open(pkl_path, 'wb') as fout:
                 pickle.dump((self.tree, self.num_ts, self.ts_data, self.feats),
                             fout)
+    
+    def generator(self, train):
+        pred_hor = flags.pred_hor
+        cont_len = flags.cont_len
+        tot_len = NUM_TIME_STEPS
+        if train:
+            num_data = tot_len - 2 * pred_hor - cont_len
+            for i in range(num_data):
+                sub_ts = self.ts_data[:, i:i+cont_len+pred_hor]
+                sub_feat = self.feats[:, i:i+cont_len+pred_hor]
+                yield sub_ts, sub_feat
+        else:
+            start_idx = tot_len - pred_hor - cont_len
+            sub_ts = self.ts_data[:, start_idx:]
+            sub_feat = self.feats[:, start_idx:]
+            for i in range(1):
+                yield sub_ts, sub_feat
+                
+    def get_tf_dataset(self, train):
+        dataset = tf.data.Dataset.from_generator(
+            lambda: self.generator(train),
+            (tf.float32, tf.float32),
+        )
+        return dataset
 
 
 class Tree:
@@ -147,6 +173,18 @@ def main(_):
     print(data.ts_data.dtype)
     print(data.feats.dtype)
     print(data.ts_data.shape)
+    print(data.feats.shape)
+
+    for d in data.generator(True):
+        print(d[0].shape, d[1].shape)
+        break
+
+    for d in data.generator(False):
+        print(d[0].shape, d[1].shape)
+
+    dataset = data.get_tf_dataset(True)
+    for d in dataset.take(1).as_numpy_iterator():
+        print(d[0].shape, d[1].shape)
 
 
 if __name__ == "__main__":
