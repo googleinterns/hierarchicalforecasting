@@ -16,6 +16,10 @@ NUM_TIME_STEPS = 1941  # Starts from 1
 
 class M5Data:
     def __init__(self):
+        self.read_data()
+        self.mean_scaling()
+
+    def read_data(self):
         data_path = os.path.join(flags.m5dir, 'sales_train_evaluation.csv')
         feats_path = os.path.join(flags.m5dir, 'calendar.csv')
         pkl_path = os.path.join(flags.m5dir, 'data.pkl')
@@ -67,29 +71,33 @@ class M5Data:
             with open(pkl_path, 'wb') as fout:
                 pickle.dump((self.tree, self.num_ts, self.ts_data, self.feats),
                             fout)
-    
+
+    def mean_scaling(self):
+        self.abs_means = np.mean(np.abs(self.ts_data), axis=1)
+        self.ts_data = self.ts_data / self.abs_means.reshape((-1, 1))
+
     def generator(self, train):
         pred_hor = flags.pred_hor
         cont_len = flags.cont_len
         tot_len = NUM_TIME_STEPS
         if train:
-            num_data = tot_len - 2 * pred_hor - cont_len
+            num_data = tot_len - pred_hor - (cont_len + 1)
             for i in range(num_data):
-                sub_ts = self.ts_data[:, i:i+cont_len+pred_hor]
-                sub_feat = self.feats[:, i:i+cont_len+pred_hor]
-                yield sub_ts, sub_feat
+                sub_ts = self.ts_data[:, i:i+cont_len+1]
+                sub_feat = self.feats[:, i:i+cont_len+1]
+                yield sub_feat.T, sub_ts.T  # t x *
         else:
             start_idx = tot_len - pred_hor - cont_len
             sub_ts = self.ts_data[:, start_idx:]
             sub_feat = self.feats[:, start_idx:]
             for i in range(1):
-                yield sub_ts, sub_feat
-                
-    def get_tf_dataset(self, train):
+                yield sub_feat.T, sub_ts.T  # t x *
+
+    def tf_dataset(self, train):
         dataset = tf.data.Dataset.from_generator(
             lambda: self.generator(train),
             (tf.float32, tf.float32),
-        )
+        ).shuffle(1000).prefetch(tf.data.experimental.AUTOTUNE)
         return dataset
 
 
@@ -182,9 +190,10 @@ def main(_):
     for d in data.generator(False):
         print(d[0].shape, d[1].shape)
 
-    dataset = data.get_tf_dataset(True)
-    for d in dataset.take(1).as_numpy_iterator():
-        print(d[0].shape, d[1].shape)
+    dataset = data.tf_dataset(True)
+    for d in dataset:
+        print(d)
+        break
 
 
 if __name__ == "__main__":

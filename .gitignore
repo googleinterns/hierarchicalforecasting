@@ -1,7 +1,7 @@
 # data files
 *.csv
 *.zip
+*.pkl
 
 # python files
 *.pyc
-
