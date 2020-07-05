@@ -26,7 +26,7 @@ def main(_):
     expt_dir = os.path.join('./logs',
         flags.dataset, flags.model, flags.expt_name)
 
-    optimizer = keras.optimizers.Adam(learning_rate=0.001)
+    optimizer = keras.optimizers.Adam(learning_rate=0.0001)
 
     ckpt = tf.train.Checkpoint(step=tf.Variable(0), optimizer=optimizer,
         model=model)
@@ -40,7 +40,7 @@ def main(_):
     else:
         print('*' * 10, f'Checkpoint found. Restoring from {ckpt_path}')
     
-
+    optimizer.learning_rate.assign(0.0001)
     @tf.function
     def train_step(feats, y_obs):
         with tf.GradientTape() as tape:
@@ -49,26 +49,68 @@ def main(_):
         
         grads = tape.gradient(loss, model.trainable_weights)
         optimizer.apply_gradients(zip(grads, model.trainable_variables))
-        return loss
+        return loss, mean, sig
+
+    metrics = Metrics(
+        ['loss', 'abs_err'],
+        expt_dir
+    )
 
     for ep in range(int(ckpt.step), flags.train_epochs):
         print(f'Epoch {ep}')
-        loss_mean = 0.0
+
         iterator = tqdm(data.tf_dataset(train=True))
-        model.reset_states()
         for i, (feats, y_obs) in enumerate(iterator):
-            loss = train_step(feats, y_obs)
-            loss_mean = update_mean(loss_mean, loss, i)
+            loss, mean, sig = train_step(feats, y_obs)
+            metrics.update(
+                {
+                    'loss': loss,
+                    'abs_err': tf.reduce_mean(tf.abs(mean - y_obs[1:]))
+                }
+            )
             if i % 100 == 0:
-                iterator.set_description(f'Loss {loss_mean:.4f}')
+                mean_loss = metrics.metric_dict['loss'].result().numpy()
+                iterator.set_description(f'Loss {mean_loss:.4f}')
         ckpt.step.assign_add(1)
         ckpt_manager.save()
+        metrics.write(step=ep)
+        metrics.write_others(
+            {
+                'learning_rate': optimizer.learning_rate
+            },
+            step=ep
+        )
 
-            # break
+
+class Metrics:
+    def __init__(self, metric_list, log_dir):
+        self.metric_dict = {metric: keras.metrics.Mean() for metric in metric_list}
+        self.writer = tf.summary.create_file_writer(log_dir)
+    
+    def update(self, update_dict):
+        for metric in update_dict:
+
+            self.metric_dict[metric].update_state(values=[update_dict[metric]])
+    
+    def reset(self):
+        for metric in self.metric_dict:
+            self.metric_dict[metric].reset_states()
+    
+    def write(self, step):
+        with self.writer.as_default():
+            for metric in self.metric_dict:
+                tf.summary.scalar(metric, self.metric_dict[metric].result(), step=step)
+                self.metric_dict[metric].reset_states()
+        self.writer.flush()
+    
+    def write_others(self, dict, step):
+        with self.writer.as_default():
+            for metric in dict:
+                tf.summary.scalar(metric, dict[metric], step=step)
 
 
-def update_mean(curr_mean, val, old_count):
-    return curr_mean + (val - curr_mean) / (old_count + 1)
+# def update_mean(curr_mean, val, old_count):
+#     return curr_mean + (val - curr_mean) / (old_count + 1)
 
 
 if __name__ == "__main__":

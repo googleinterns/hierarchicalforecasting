@@ -15,9 +15,9 @@ class DFRNN(keras.Model):
         self.num_ts = num_ts
         self.time_steps = flags.cont_len
 
-        self.lstm1 = layers.LSTM(flags.global_lstm_hidden, stateful=True,
+        self.lstm1 = layers.LSTM(flags.global_lstm_hidden,
                             return_sequences=True, time_major=True)
-        self.lstm2 = layers.LSTM(flags.local_lstm_hidden, stateful=True,
+        self.lstm2 = layers.LSTM(flags.local_lstm_hidden,
                             return_sequences=True, time_major=True)
         self.dense1 = layers.Dense(flags.prin_comp, activation='tanh')
         self.dense2 = layers.Dense(num_ts)
