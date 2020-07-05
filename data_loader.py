@@ -94,10 +94,15 @@ class M5Data:
                 yield sub_feat.T, sub_ts.T  # t x *
 
     def tf_dataset(self, train):
+        length = flags.cont_len + 1
         dataset = tf.data.Dataset.from_generator(
             lambda: self.generator(train),
             (tf.float32, tf.float32),
-        ).shuffle(1000).prefetch(tf.data.experimental.AUTOTUNE)
+            (
+                tf.TensorShape([length, self.feats.shape[0]]),
+                tf.TensorShape([length, self.ts_data.shape[0]])
+            )
+        ).shuffle(2000).prefetch(tf.data.experimental.AUTOTUNE)
         return dataset
 
 

@@ -3,5 +3,8 @@
 *.zip
 *.pkl
 
+# logs
+logs/
+
 # python files
 *.pyc

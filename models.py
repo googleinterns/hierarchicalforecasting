@@ -15,9 +15,9 @@ class DFRNN(keras.Model):
         self.num_ts = num_ts
         self.time_steps = flags.cont_len
 
-        self.lstm1 = layers.LSTM(flags.global_lstm_hidden,
+        self.lstm1 = layers.LSTM(flags.global_lstm_hidden, stateful=True,
                             return_sequences=True, time_major=True)
-        self.lstm2 = layers.LSTM(flags.local_lstm_hidden,
+        self.lstm2 = layers.LSTM(flags.local_lstm_hidden, stateful=True,
                             return_sequences=True, time_major=True)
         self.dense1 = layers.Dense(flags.prin_comp, activation='tanh')
         self.dense2 = layers.Dense(num_ts)
@@ -33,11 +33,11 @@ class DFRNN(keras.Model):
         # Computing global effects
         stat_feats = tf.expand_dims(feats[1:], axis=1)  # t x 1 x d
         y_feats = tf.expand_dims(y_obs[:-1], axis=1)  # t x 1 x n
-
         feats = tf.concat([stat_feats, y_feats], axis=-1)  # t x 1 x D
         
         outputs = self.lstm1(feats)  # t x 1 x h
         outputs = tf.squeeze(outputs, axis=1)  # t x h
+
         basis = self.dense1(outputs)  # t x k
 
         global_effect = self.dense2(basis)  # t x n
@@ -52,7 +52,6 @@ class DFRNN(keras.Model):
         w = tf.transpose(w)  # n x k
         w = tf.expand_dims(w, 0)  # 1 x n x k
         ts_emb = tf.repeat(w, repeats=self.time_steps, axis=0)  # t x n x k
-
         local_feats = tf.concat([y_feats, stat_feats, ts_emb], axis=-1)  # t x n x D'
         outputs = self.lstm2(local_feats)  # t x n x h'
         sigma = self.dense3(outputs)
