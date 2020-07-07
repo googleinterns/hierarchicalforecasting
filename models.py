@@ -23,16 +23,15 @@ class DFRNN(keras.Model):
         self.dense2 = layers.Dense(num_ts)
         self.dense3 = layers.Dense(1)
 
-    @tf.function
-    def call(self, feats, y_obs):
+    def call(self, feats, y_prev):
         '''
-        feats: (t+1) x d
-        y_obs: (t+1) x n
+        feats: t x d
+        y_prev: t x n
         '''
 
         # Computing global effects
-        stat_feats = tf.expand_dims(feats[1:], axis=1)  # t x 1 x d
-        y_feats = tf.expand_dims(y_obs[:-1], axis=1)  # t x 1 x n
+        stat_feats = tf.expand_dims(feats, axis=1)  # t x 1 x d
+        y_feats = tf.expand_dims(y_prev, axis=1)  # t x 1 x n
         feats = tf.concat([stat_feats, y_feats], axis=-1)  # t x 1 x D
         
         outputs = self.lstm1(feats)  # t x 1 x h
@@ -59,15 +58,67 @@ class DFRNN(keras.Model):
         sigma = tf.math.log(1 + tf.exp(sigma))
 
         return global_effect, sigma
+    
+    @tf.function
+    def train_step(self, feats, y_obs, optimizer):
+        with tf.GradientTape() as tape:
+            mean, sig = self(feats[1:], y_obs[:-1])
+            loss = gaussian_nll(mean, sig, y_obs[1:])
+        
+        grads = tape.gradient(loss, self.trainable_variables)
+        optimizer.apply_gradients(zip(grads, self.trainable_variables))
+
+        abs_err = tf.reduce_mean(tf.abs(mean - y_obs[1:]))
+        return loss, abs_err
+    
+    def forecast(self, feats, y_prev):
+        '''
+        feats: (t+p-1) x n
+        y_prev: t x n
+        '''
+        cont_len = flags.cont_len
+        pred_hor = flags.pred_hor
+        
+        for i in range(pred_hor):
+            mean, sig = self.call(feats[i:i+cont_len], y_prev[i:i+cont_len])
+            mean = mean[-1]
+            sig = sig[-1]
+            sample = mean + sig * tf.random.normal(mean.shape)
+            sample = np.clip(sample.numpy(), a_min=0, a_max=None).reshape((1, -1))
+            y_prev = np.concatenate([y_prev, sample], axis=0)
+        
+        return y_prev[-pred_hor:]
+
+    def eval(self, dataset):
+        cont_len = flags.cont_len
+        pred_hor = flags.pred_hor
+
+        diffs = []
+        for feats, y_obs in dataset:
+            feats = feats.numpy()
+            y_obs = y_obs.numpy()
+            cont_len = flags.cont_len
+            pred_hor = flags.pred_hor
+            
+            assert(y_obs.shape[0] == cont_len + pred_hor)
+            assert(feats.shape[0] == cont_len + pred_hor)
+
+            samples = []
+            for i in range(100):
+                y_pred = self.forecast(feats[1:], y_obs[:cont_len])
+                samples.append(y_pred)
+            medians = np.median(samples, axis=0)
+            diffs.append(np.abs(medians - y_obs[-pred_hor:]))
+        
+        return {'q50': np.mean(diffs)}
 
 
 @tf.function
 def gaussian_nll(mean, sigma, y_obs):
     '''
     mean, sigma: t x n
-    y_obs: (t+1) x n
+    y_obs: t x n
     '''
-    y_obs = y_obs[1:] # t x n
     nll = 0.5 * ((y_obs - mean) / sigma)**2 + tf.math.log(sigma)
     nll = tf.reduce_mean(nll)
     return nll

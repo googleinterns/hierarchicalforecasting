@@ -81,7 +81,7 @@ class M5Data:
         cont_len = flags.cont_len
         tot_len = NUM_TIME_STEPS
         if train:
-            num_data = tot_len - pred_hor - (cont_len + 1)
+            num_data = tot_len - pred_hor - cont_len
             for i in range(num_data):
                 sub_ts = self.ts_data[:, i:i+cont_len+1]
                 sub_feat = self.feats[:, i:i+cont_len+1]
@@ -94,14 +94,14 @@ class M5Data:
                 yield sub_feat.T, sub_ts.T  # t x *
 
     def tf_dataset(self, train):
-        length = flags.cont_len + 1
+        # length = flags.cont_len + 1
         dataset = tf.data.Dataset.from_generator(
             lambda: self.generator(train),
             (tf.float32, tf.float32),
-            (
-                tf.TensorShape([length, self.feats.shape[0]]),
-                tf.TensorShape([length, self.ts_data.shape[0]])
-            )
+            # (
+            #     tf.TensorShape([length, self.feats.shape[0]]),
+            #     tf.TensorShape([length, self.ts_data.shape[0]])
+            # )
         ).shuffle(2000).prefetch(tf.data.experimental.AUTOTUNE)
         return dataset
 

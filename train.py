@@ -26,9 +26,12 @@ def main(_):
     expt_dir = os.path.join('./logs',
         flags.dataset, flags.model, flags.expt_name)
 
-    optimizer = keras.optimizers.Adam(learning_rate=0.0001)
+    step = tf.Variable(0)
+    sch = keras.optimizers.schedules.PiecewiseConstantDecay(
+        boundaries=[50, 80], values=[1e-4, 1e-5, 1e-6])
+    optimizer = keras.optimizers.Adam()
 
-    ckpt = tf.train.Checkpoint(step=tf.Variable(0), optimizer=optimizer,
+    ckpt = tf.train.Checkpoint(step=step, optimizer=optimizer,
         model=model)
     ckpt_manager = tf.train.CheckpointManager(ckpt, expt_dir, max_to_keep=5,
         keep_checkpoint_every_n_hours=2)
@@ -40,46 +43,38 @@ def main(_):
     else:
         print('*' * 10, f'Checkpoint found. Restoring from {ckpt_path}')
     
-    optimizer.learning_rate.assign(0.0001)
-    @tf.function
-    def train_step(feats, y_obs):
-        with tf.GradientTape() as tape:
-            mean, sig = model(feats, y_obs)
-            loss = models.gaussian_nll(mean, sig, y_obs)
-        
-        grads = tape.gradient(loss, model.trainable_weights)
-        optimizer.apply_gradients(zip(grads, model.trainable_variables))
-        return loss, mean, sig
-
     metrics = Metrics(
         ['loss', 'abs_err'],
         expt_dir
     )
 
-    for ep in range(int(ckpt.step), flags.train_epochs):
+    while step.numpy() < flags.train_epochs:
+        ep = step.numpy()
         print(f'Epoch {ep}')
+        optimizer.learning_rate.assign(sch(step))
 
         iterator = tqdm(data.tf_dataset(train=True))
         for i, (feats, y_obs) in enumerate(iterator):
-            loss, mean, sig = train_step(feats, y_obs)
+            loss, abs_err = model.train_step(feats, y_obs, optimizer)
             metrics.update(
                 {
                     'loss': loss,
-                    'abs_err': tf.reduce_mean(tf.abs(mean - y_obs[1:]))
+                    'abs_err': abs_err
                 }
             )
             if i % 100 == 0:
                 mean_loss = metrics.metric_dict['loss'].result().numpy()
                 iterator.set_description(f'Loss {mean_loss:.4f}')
-        ckpt.step.assign_add(1)
+        step.assign_add(1)
         ckpt_manager.save()
         metrics.write(step=ep)
         metrics.write_others(
             {
-                'learning_rate': optimizer.learning_rate
+                'learning_rate': optimizer.learning_rate.numpy()
             },
-            step=ep
-        )
+            step=ep)
+        eval_dict = model.eval(data.tf_dataset(train=False))
+        metrics.write_others(eval_dict, step=ep)
 
 
 class Metrics:
