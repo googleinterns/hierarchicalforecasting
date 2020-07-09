@@ -24,29 +24,25 @@ def main(_):
         raise ValueError(f'Unknown model {flags.model}')
     
     expt_dir = os.path.join('./logs',
-        flags.dataset, flags.model, flags.expt_name)
+        flags.dataset, flags.model, flags.expt)
 
     step = tf.Variable(0)
     sch = keras.optimizers.schedules.PiecewiseConstantDecay(
-        boundaries=[50, 80], values=[1e-4, 1e-5, 1e-6])
+        boundaries=[15, 20], values=[1e-4, 1e-5, 1e-6])
     optimizer = keras.optimizers.Adam()
 
     ckpt = tf.train.Checkpoint(step=step, optimizer=optimizer,
         model=model)
-    ckpt_manager = tf.train.CheckpointManager(ckpt, expt_dir, max_to_keep=5,
-        keep_checkpoint_every_n_hours=2)
-    
+    ckpt_manager = tf.train.CheckpointManager(ckpt, expt_dir, max_to_keep=5)
     ckpt_path = ckpt_manager.latest_checkpoint
     ckpt.restore(ckpt_path)
+
     if ckpt_path is None:
         print('*' * 10, 'Checkpoint not found. Initializing ...')
     else:
         print('*' * 10, f'Checkpoint found. Restoring from {ckpt_path}')
     
-    metrics = Metrics(
-        ['loss', 'abs_err'],
-        expt_dir
-    )
+    summary = Summary(expt_dir)
 
     while step.numpy() < flags.train_epochs:
         ep = step.numpy()
@@ -56,35 +52,37 @@ def main(_):
         iterator = tqdm(data.tf_dataset(train=True))
         for i, (feats, y_obs) in enumerate(iterator):
             loss, abs_err = model.train_step(feats, y_obs, optimizer)
-            metrics.update(
-                {
-                    'loss': loss,
-                    'abs_err': abs_err
-                }
-            )
+            # Train metrics
+            summary.update({
+                'train/loss': loss,
+                'train/abs_err': abs_err
+            })
             if i % 100 == 0:
-                mean_loss = metrics.metric_dict['loss'].result().numpy()
+                mean_loss = summary.metric_dict['train/loss'].result().numpy()
                 iterator.set_description(f'Loss {mean_loss:.4f}')
         step.assign_add(1)
         ckpt_manager.save()
-        metrics.write(step=ep)
-        metrics.write_others(
-            {
-                'learning_rate': optimizer.learning_rate.numpy()
-            },
-            step=ep)
+
+        # Other metrics
+        summary.update({
+            'train/learning_rate': optimizer.learning_rate.numpy()
+        })
+        
+        # Test metrics
         eval_dict = model.eval(data.tf_dataset(train=False))
-        metrics.write_others(eval_dict, step=ep)
+        summary.update(eval_dict)
+        summary.write(step=ep)
 
 
-class Metrics:
-    def __init__(self, metric_list, log_dir):
-        self.metric_dict = {metric: keras.metrics.Mean() for metric in metric_list}
+class Summary:
+    def __init__(self, log_dir):
+        self.metric_dict = {}
         self.writer = tf.summary.create_file_writer(log_dir)
     
     def update(self, update_dict):
         for metric in update_dict:
-
+            if metric not in self.metric_dict:
+                self.metric_dict[metric] = keras.metrics.Mean()
             self.metric_dict[metric].update_state(values=[update_dict[metric]])
     
     def reset(self):
@@ -97,11 +95,6 @@ class Metrics:
                 tf.summary.scalar(metric, self.metric_dict[metric].result(), step=step)
                 self.metric_dict[metric].reset_states()
         self.writer.flush()
-    
-    def write_others(self, dict, step):
-        with self.writer.as_default():
-            for metric in dict:
-                tf.summary.scalar(metric, dict[metric], step=step)
 
 
 # def update_mean(curr_mean, val, old_count):

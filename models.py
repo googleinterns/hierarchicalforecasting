@@ -1,6 +1,7 @@
 import tensorflow as tf
 import numpy as np
 import global_flags
+import sys
 
 from tensorflow import keras
 from tensorflow.keras import layers
@@ -23,6 +24,7 @@ class DFRNN(keras.Model):
         self.dense2 = layers.Dense(num_ts)
         self.dense3 = layers.Dense(1)
 
+    @tf.function
     def call(self, feats, y_prev):
         '''
         feats: t x d
@@ -33,14 +35,18 @@ class DFRNN(keras.Model):
         stat_feats = tf.expand_dims(feats, axis=1)  # t x 1 x d
         y_feats = tf.expand_dims(y_prev, axis=1)  # t x 1 x n
         feats = tf.concat([stat_feats, y_feats], axis=-1)  # t x 1 x D
+        # print('1', '*' * 10, feats.shape)
         
         outputs = self.lstm1(feats)  # t x 1 x h
         outputs = tf.squeeze(outputs, axis=1)  # t x h
+        # print('2', '*' * 10, outputs.shape)
 
         basis = self.dense1(outputs)  # t x k
+        # print('3', '*' * 10, basis.shape)
 
         global_effect = self.dense2(basis)  # t x n
-        global_effect = tf.exp(global_effect)
+        global_effect = tf.math.softplus(global_effect)
+        # print('4', global_effect.shape)
 
         # Computing local effects
         y_feats = tf.transpose(y_feats, [0, 2, 1])  # t x n x 1
@@ -51,11 +57,12 @@ class DFRNN(keras.Model):
         w = tf.transpose(w)  # n x k
         w = tf.expand_dims(w, 0)  # 1 x n x k
         ts_emb = tf.repeat(w, repeats=self.time_steps, axis=0)  # t x n x k
+        # print('5', '*' * 10, ts_emb.shape)
         local_feats = tf.concat([y_feats, stat_feats, ts_emb], axis=-1)  # t x n x D'
         outputs = self.lstm2(local_feats)  # t x n x h'
-        sigma = self.dense3(outputs)
-        sigma = tf.squeeze(sigma, axis=-1)  # t x n x 1
-        sigma = tf.math.log(1 + tf.exp(sigma))
+        sigma = self.dense3(outputs)  # t x n x 1
+        sigma = tf.squeeze(sigma, axis=-1)
+        sigma = tf.math.softplus(sigma)
 
         return global_effect, sigma
     
@@ -65,10 +72,11 @@ class DFRNN(keras.Model):
             mean, sig = self(feats[1:], y_obs[:-1])
             loss = gaussian_nll(mean, sig, y_obs[1:])
         
+        abs_err = tf.reduce_mean(tf.abs(mean - y_obs[1:]))
+
         grads = tape.gradient(loss, self.trainable_variables)
         optimizer.apply_gradients(zip(grads, self.trainable_variables))
 
-        abs_err = tf.reduce_mean(tf.abs(mean - y_obs[1:]))
         return loss, abs_err
     
     def forecast(self, feats, y_prev):
@@ -94,23 +102,32 @@ class DFRNN(keras.Model):
         pred_hor = flags.pred_hor
 
         diffs = []
+        pred_paths = []
         for feats, y_obs in dataset:
             feats = feats.numpy()
             y_obs = y_obs.numpy()
-            cont_len = flags.cont_len
-            pred_hor = flags.pred_hor
             
             assert(y_obs.shape[0] == cont_len + pred_hor)
             assert(feats.shape[0] == cont_len + pred_hor)
 
             samples = []
-            for i in range(100):
+            for _ in range(100):
                 y_pred = self.forecast(feats[1:], y_obs[:cont_len])
                 samples.append(y_pred)
-            medians = np.median(samples, axis=0)
-            diffs.append(np.abs(medians - y_obs[-pred_hor:]))
+            pred_paths.append(samples)
+            median = np.median(samples, axis=0)
+            diffs.append(np.abs(median - y_obs[-pred_hor:]))
         
-        return {'q50': np.mean(diffs)}
+        pred_paths = np.asarray(pred_paths)
+        np.save('notebooks/evals.npy', pred_paths)
+        diffs = np.asarray(diffs)
+        return {
+            'test/q50-@01': np.mean(diffs[:,0,:]),
+            'test/q50-@05': np.mean(diffs[:,4,:]),
+            'test/q50-@10': np.mean(diffs[:,9,:]),
+            'test/q50-@20': np.mean(diffs[:,19,:]),
+            'test/q50-@30': np.mean(diffs[:,29,:]),
+        }
 
 
 @tf.function

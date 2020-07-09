@@ -33,7 +33,9 @@ class M5Data:
             print('Pickle not found. Reading from csv ...')
             df = pd.read_csv(data_path, ',')
             self.tree = Tree()
-            for item_id in df['item_id']:
+
+            col_name = 'dept_id' # 'item_id'
+            for item_id in df[col_name]:
                 self.tree.insert_seq(item_id)
             self.tree.init_leaf_count()
             
@@ -41,7 +43,7 @@ class M5Data:
             self.ts_data = np.zeros((self.num_ts, NUM_TIME_STEPS), dtype=np.float32)
 
             cols = df.columns
-            node_str_idx = cols.get_loc('item_id') + 1
+            node_str_idx = cols.get_loc(col_name) + 1
             d_1_idx = cols.get_loc('d_1') + 1
             d_n_idx = cols.get_loc(f'd_{NUM_TIME_STEPS}') + 1
             for row in tqdm(df.itertuples()):

@@ -2,6 +2,7 @@
 *.csv
 *.zip
 *.pkl
+*.npy
 
 # logs
 logs/
