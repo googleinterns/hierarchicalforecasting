@@ -17,7 +17,7 @@ NUM_TIME_STEPS = 1941  # Starts from 1
 class M5Data:
     def __init__(self):
         self.read_data()
-        self.mean_scaling()
+        self.variation_scaling()
 
     def read_data(self):
         data_path = os.path.join(flags.m5dir, 'sales_train_evaluation.csv')
@@ -34,7 +34,7 @@ class M5Data:
             df = pd.read_csv(data_path, ',')
             self.tree = Tree()
 
-            col_name = 'dept_id' # 'item_id'
+            col_name = 'item_id' # 'dept_id'
             for item_id in df[col_name]:
                 self.tree.insert_seq(item_id)
             self.tree.init_leaf_count()
@@ -75,8 +75,14 @@ class M5Data:
                             fout)
 
     def mean_scaling(self):
-        self.abs_means = np.mean(np.abs(self.ts_data), axis=1)
-        self.ts_data = self.ts_data / self.abs_means.reshape((-1, 1))
+        self.abs_means = np.mean(np.abs(self.ts_data), axis=1).reshape((-1, 1))
+        self.ts_data = self.ts_data / self.abs_means
+    
+    def variation_scaling(self):
+        self.variations = self.ts_data[:, 1:] - self.ts_data[:, :-1]
+        self.variations = np.mean(self.variations**2, axis=1)
+        self.variations = np.sqrt(self.variations).reshape((-1, 1))
+        self.ts_data = self.ts_data / self.variations
 
     def generator(self, train):
         pred_hor = flags.pred_hor

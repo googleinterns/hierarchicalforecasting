@@ -28,7 +28,7 @@ def main(_):
 
     step = tf.Variable(0)
     sch = keras.optimizers.schedules.PiecewiseConstantDecay(
-        boundaries=[15, 20], values=[1e-4, 1e-5, 1e-6])
+        boundaries=[50, 85], values=[1e-3, 1e-4, 1e-5])
     optimizer = keras.optimizers.Adam()
 
     ckpt = tf.train.Checkpoint(step=step, optimizer=optimizer,
@@ -51,11 +51,11 @@ def main(_):
 
         iterator = tqdm(data.tf_dataset(train=True))
         for i, (feats, y_obs) in enumerate(iterator):
-            loss, abs_err = model.train_step(feats, y_obs, optimizer)
+            loss = model.train_step(feats, y_obs, optimizer)
             # Train metrics
             summary.update({
                 'train/loss': loss,
-                'train/abs_err': abs_err
+                'train/rmse': tf.sqrt(loss)
             })
             if i % 100 == 0:
                 mean_loss = summary.metric_dict['train/loss'].result().numpy()
@@ -70,6 +70,7 @@ def main(_):
         
         # Test metrics
         eval_dict = model.eval(data.tf_dataset(train=False))
+        print(eval_dict)
         summary.update(eval_dict)
         summary.write(step=ep)
 
