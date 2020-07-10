@@ -97,8 +97,8 @@ class M5Data:
                 yield sub_feat.T, sub_ts.T  # t x *
         else:
             start_idx = tot_len - pred_hor - cont_len
-            sub_ts = self.ts_data[:, start_idx:]
-            sub_feat = self.feats[:, start_idx:]
+            sub_ts = self.ts_data[:, start_idx:tot_len]
+            sub_feat = self.feats[:, start_idx:tot_len]
             for i in range(1):
                 yield sub_feat.T, sub_ts.T  # t x *
 
@@ -185,7 +185,8 @@ class Tree:
     
     def _levels_rec(self, node_str, depth):
         if depth not in self.levels:
-            self.levels[depth] = [self.node_id[node_str]]
+            self.levels[depth] = []
+        self.levels[depth].append(self.node_id[node_str])
         for ch in self.children[node_str]:
             self._levels_rec(ch, depth+1)
 

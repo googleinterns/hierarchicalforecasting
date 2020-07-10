@@ -99,7 +99,7 @@ class DFRNN(keras.Model):
                 rmses.append(sub_mean)
                 return_dict[f'test/rmse@{d}'] = sub_mean
 
-            return_dict['rmse'] = np.mean(rmses)
+            return_dict['test/rmse'] = np.mean(rmses)
 
         np.save('notebooks/evals.npy', y_pred)
         return return_dict
