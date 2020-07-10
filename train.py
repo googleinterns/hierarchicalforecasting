@@ -28,7 +28,7 @@ def main(_):
 
     step = tf.Variable(0)
     sch = keras.optimizers.schedules.PiecewiseConstantDecay(
-        boundaries=[50, 85], values=[1e-3, 1e-4, 1e-5])
+        boundaries=[10, 15], values=[1e-3, 1e-4, 1e-5])
     optimizer = keras.optimizers.Adam()
 
     ckpt = tf.train.Checkpoint(step=step, optimizer=optimizer,
@@ -44,12 +44,17 @@ def main(_):
     
     summary = Summary(expt_dir)
 
+    eval_dict = model.eval(data.tf_dataset(train=False), data.tree.levels)
+    print(eval_dict)
+    summary.update(eval_dict)
+    summary.write(step=step.numpy())
+
     while step.numpy() < flags.train_epochs:
         ep = step.numpy()
         print(f'Epoch {ep}')
         optimizer.learning_rate.assign(sch(step))
 
-        iterator = tqdm(data.tf_dataset(train=True))
+        iterator = tqdm(data.tf_dataset(train=True), mininterval=2)
         for i, (feats, y_obs) in enumerate(iterator):
             loss = model.train_step(feats, y_obs, optimizer)
             # Train metrics
@@ -69,10 +74,10 @@ def main(_):
         })
         
         # Test metrics
-        eval_dict = model.eval(data.tf_dataset(train=False))
+        eval_dict = model.eval(data.tf_dataset(train=False), data.tree.levels)
         print(eval_dict)
         summary.update(eval_dict)
-        summary.write(step=ep)
+        summary.write(step=step.numpy())
 
 
 class Summary:

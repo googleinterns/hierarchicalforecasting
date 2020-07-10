@@ -38,6 +38,7 @@ class M5Data:
             for item_id in df[col_name]:
                 self.tree.insert_seq(item_id)
             self.tree.init_leaf_count()
+            self.tree.init_levels()
             
             self.num_ts = self.tree.num_nodes
             self.ts_data = np.zeros((self.num_ts, NUM_TIME_STEPS), dtype=np.float32)
@@ -87,7 +88,7 @@ class M5Data:
     def generator(self, train):
         pred_hor = flags.pred_hor
         cont_len = flags.cont_len
-        tot_len = NUM_TIME_STEPS
+        tot_len = NUM_TIME_STEPS - 30
         if train:
             num_data = tot_len - pred_hor - cont_len
             for i in range(num_data):
@@ -177,6 +178,16 @@ class Tree:
             tot_count += 1
         self.leaf_count[node_str] = tot_count
         return tot_count
+    
+    def init_levels(self):
+        self.levels = {}
+        self._levels_rec(self.root, 0)
+    
+    def _levels_rec(self, node_str, depth):
+        if depth not in self.levels:
+            self.levels[depth] = [self.node_id[node_str]]
+        for ch in self.children[node_str]:
+            self._levels_rec(ch, depth+1)
 
 
 def main(_):
