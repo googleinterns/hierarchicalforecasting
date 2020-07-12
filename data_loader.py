@@ -74,6 +74,15 @@ class M5Data:
             with open(pkl_path, 'wb') as fout:
                 pickle.dump((self.tree, self.num_ts, self.ts_data, self.feats),
                             fout)
+    
+    @property
+    def weights(self):
+        levels = self.tree.levels
+        w = np.ones(self.num_ts)
+        for _, level in levels.items():
+            w[level] /= len(level)
+        w /= len(levels)
+        return w
 
     def mean_scaling(self):
         self.abs_means = np.mean(np.abs(self.ts_data), axis=1).reshape((-1, 1))
@@ -219,6 +228,10 @@ def main(_):
     for d in dataset:
         print(d)
         break
+
+    print(data.weights)
+    print(np.sum(data.weights))
+    print(data.weights.shape)
 
 
 if __name__ == "__main__":

@@ -15,11 +15,12 @@ def main(_):
 
     if flags.dataset == 'm5':
         data = data_loader.M5Data()
+        train_weights = data.weights
     else:
         raise ValueError(f'Unknown dataset {flags.dataset}')
 
     if flags.model == 'dfrnn':
-        model = models.DFRNN(num_ts=data.num_ts)
+        model = models.DFRNN(num_ts=data.num_ts, train_weights=train_weights)
     else:
         raise ValueError(f'Unknown model {flags.model}')
     
@@ -28,7 +29,7 @@ def main(_):
 
     step = tf.Variable(0)
     sch = keras.optimizers.schedules.PiecewiseConstantDecay(
-        boundaries=[10, 15], values=[1e-4, 1e-5, 1e-6])
+        boundaries=[6, 10], values=[1e-3, 1e-4, 1e-5])
     optimizer = keras.optimizers.Adam()
 
     ckpt = tf.train.Checkpoint(step=step, optimizer=optimizer,
@@ -91,15 +92,11 @@ class Summary:
                 self.metric_dict[metric] = keras.metrics.Mean()
             self.metric_dict[metric].update_state(values=[update_dict[metric]])
     
-    def reset(self):
-        for metric in self.metric_dict:
-            self.metric_dict[metric].reset_states()
-    
     def write(self, step):
         with self.writer.as_default():
             for metric in self.metric_dict:
                 tf.summary.scalar(metric, self.metric_dict[metric].result(), step=step)
-                self.metric_dict[metric].reset_states()
+        self.metric_dict = {}
         self.writer.flush()
 
 

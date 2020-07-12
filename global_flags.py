@@ -15,9 +15,11 @@ flags.DEFINE_integer('pred_hor', 28, 'Length of the prediction horizon')
 #                     'Number of principal components for the global model')
 flags.DEFINE_integer('global_lstm_hidden', 100,
                     'Number of LSTM hidden units in the global model')
-flags.DEFINE_integer('local_lstm_hidden', 200,
+flags.DEFINE_integer('local_lstm_hidden', 500,
                     'Number of LSTM hidden units in the local model')
-flags.DEFINE_integer('node_emb_dim', 200,
+flags.DEFINE_integer('feat_emb_dim', 100,
+                    'Number of LSTM hidden units in the local model')
+flags.DEFINE_integer('node_emb_dim', 20,
                     'Dimension of the node embeddings')
 
 FLAGS = flags.FLAGS

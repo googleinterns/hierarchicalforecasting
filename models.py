@@ -10,17 +10,18 @@ from tensorflow.keras import layers
 flags = global_flags.FLAGS
 
 class DFRNN(keras.Model):
-    def __init__(self, num_ts):
+    def __init__(self, num_ts, train_weights):
         super(DFRNN, self).__init__()
 
         self.num_ts = num_ts
         self.time_steps = flags.cont_len
+        self.train_weights = tf.convert_to_tensor(train_weights, dtype=tf.float32)
 
         self.lstm = layers.LSTM(flags.local_lstm_hidden,
                             return_sequences=False, time_major=True)
         self.emb = layers.Embedding(input_dim=self.num_ts,
                                     output_dim=flags.node_emb_dim)
-        self.feat_emb = layers.Dense(flags.local_lstm_hidden, activation='tanh')
+        self.feat_emb = layers.Dense(flags.feat_emb_dim, activation='tanh')
         self.dense = layers.Dense(1)
 
     @tf.function
@@ -54,10 +55,12 @@ class DFRNN(keras.Model):
     def train_step(self, feats, y_obs, optimizer):
         with tf.GradientTape() as tape:
             pred = self(feats[1:], y_obs[:-1])
-            loss = tf.math.square(pred - y_obs[-1])
+            loss = tf.reduce_sum(tf.abs(pred - y_obs[-1]) * self.train_weights)
 
         grads = tape.gradient(loss, self.trainable_variables)
         optimizer.apply_gradients(zip(grads, self.trainable_variables))
+
+        print(self.trainable_variables)
 
         return loss
     
