@@ -29,7 +29,7 @@ def main(_):
 
     step = tf.Variable(0)
     sch = keras.optimizers.schedules.PiecewiseConstantDecay(
-        boundaries=[6, 10], values=[1e-3, 1e-4, 1e-5])
+        boundaries=[8, 14], values=[1e-3, 1e-4, 1e-5])
     optimizer = keras.optimizers.Adam()
 
     ckpt = tf.train.Checkpoint(step=step, optimizer=optimizer,

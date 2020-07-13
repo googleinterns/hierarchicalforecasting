@@ -23,6 +23,13 @@ class DFRNN(keras.Model):
                                     output_dim=flags.node_emb_dim)
         self.feat_emb = layers.Dense(flags.feat_emb_dim, activation='tanh')
         self.dense = layers.Dense(1)
+        
+        self.scale = tf.Variable(
+            initial_value=np.ones((self.num_ts)),
+            trainable=True, dtype=tf.float32)
+        self.bias = tf.Variable(
+            initial_value=np.zeros((self.num_ts)),
+            trainable=True, dtype=tf.float32)
 
     @tf.function
     def call(self, feats, y_prev):
@@ -46,7 +53,7 @@ class DFRNN(keras.Model):
         outputs = self.lstm(local_feats)  # n x h
         local_effect = self.dense(outputs)  # n x 1
         local_effect = tf.squeeze(local_effect, axis=-1)
-        
+        local_effect = local_effect * self.scale + self.bias  # n x 1
         final_output = tf.math.softplus(local_effect)  # n
 
         return final_output
