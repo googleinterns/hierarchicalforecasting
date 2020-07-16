@@ -9,9 +9,9 @@ from tensorflow.keras import layers
 
 flags = global_flags.FLAGS
 
-class DFRNN(keras.Model):
+class SimpleRNN(keras.Model):
     def __init__(self, num_ts, train_weights):
-        super(DFRNN, self).__init__()
+        super(SimpleRNN, self).__init__()
 
         self.num_ts = num_ts
         self.time_steps = flags.cont_len
@@ -21,7 +21,7 @@ class DFRNN(keras.Model):
                             return_sequences=False, time_major=True)
         self.emb = layers.Embedding(input_dim=self.num_ts,
                                     output_dim=flags.node_emb_dim)
-        self.feat_emb = layers.Dense(flags.feat_emb_dim, activation='tanh')
+        self.feat_emb = layers.Dense(flags.feat_dim_local, activation='tanh')
         self.dense = layers.Dense(1)
         
         self.scale = tf.Variable(
@@ -31,14 +31,14 @@ class DFRNN(keras.Model):
             initial_value=np.zeros((self.num_ts)),
             trainable=True, dtype=tf.float32)
 
+        if flags.use_global_model:
+            self.lstm_global = layers.LSTM(flags.global_lstm_hidden,
+                            return_sequences=False, time_major=True)
+            self.feat_emb_global = layers.Dense(flags.feat_dim_global, activation='tanh')
+            self.dense_global = layers.Dense(self.num_ts)
+    
     @tf.function
-    def call(self, feats, y_prev):
-        '''
-        feats: t x d
-        y_prev: t x n
-        '''
-
-        # Computing local effects
+    def get_local(self, feats, y_prev):
         y_feats = tf.expand_dims(y_prev, -1)  # t x n x 1
         stat_feats = tf.expand_dims(feats, axis=1)  # t x 1 x d
         stat_feats = tf.repeat(stat_feats, repeats=self.num_ts, axis=1)  # t x n x d
@@ -53,16 +53,40 @@ class DFRNN(keras.Model):
         outputs = self.lstm(local_feats)  # n x h
         local_effect = self.dense(outputs)  # n x 1
         local_effect = tf.squeeze(local_effect, axis=-1)
-        local_effect = local_effect * self.scale + self.bias  # n x 1
-        final_output = tf.math.softplus(local_effect)  # n
+        local_effect = local_effect * self.scale + self.bias  # n
+        return local_effect
+    
+    @tf.function
+    def get_global(self, feats, y_prev):
+        y_feats = tf.expand_dims(y_prev, 1)  # t x 1 x n
+        stat_feats = tf.expand_dims(feats, axis=1)  # t x 1 x d
+        global_feats = tf.concat([y_feats, stat_feats], axis=-1)  # t x 1 x D
+        outputs = self.lstm_global(global_feats)  # 1 x h
+        global_effect = self.dense_global(outputs)  # 1 x n
+        global_effect = tf.squeeze(global_effect, 0)
+        return global_effect
 
+    @tf.function
+    def call(self, feats, y_prev):
+        '''
+        feats: t x d
+        y_prev: t x n
+        '''
+
+        # Computing local effects
+        local_effect = self.get_local(feats, y_prev)
+        final_output = local_effect  # n
+        if flags.use_global_model:
+            final_output = final_output + self.get_global(feats, y_prev)
+        final_output = tf.math.softplus(final_output)  # n
         return final_output
     
     @tf.function
     def train_step(self, feats, y_obs, optimizer):
         with tf.GradientTape() as tape:
             pred = self(feats[1:], y_obs[:-1])
-            loss = tf.reduce_sum(tf.abs(pred - y_obs[-1]) * self.train_weights)
+            # loss = tf.reduce_sum(tf.abs(pred - y_obs[-1]) * self.train_weights)
+            loss = tf.reduce_mean(tf.abs(pred - y_obs[-1]))
 
         grads = tape.gradient(loss, self.trainable_variables)
         optimizer.apply_gradients(zip(grads, self.trainable_variables))
@@ -113,14 +137,3 @@ class DFRNN(keras.Model):
 
         np.save('notebooks/evals.npy', y_pred)
         return return_dict
-
-
-@tf.function
-def gaussian_nll(mean, sigma, y_obs):
-    '''
-    mean, sigma: t x n
-    y_obs: t x n
-    '''
-    nll = 0.5 * ((y_obs - mean) / sigma)**2 + tf.math.log(sigma)
-    nll = tf.reduce_mean(nll)
-    return nll

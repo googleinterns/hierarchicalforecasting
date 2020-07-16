@@ -17,7 +17,10 @@ NUM_TIME_STEPS = 1941  # Starts from 1
 class M5Data:
     def __init__(self):
         self.read_data()
-        self.variation_scaling()
+        if flags.model == 'simplernn':
+            self.variation_scaling_A()
+        elif flags.model == 'probrnn':
+            self.variation_scaling_B()
 
     def read_data(self):
         data_path = os.path.join(flags.m5dir, 'sales_train_evaluation.csv')
@@ -88,10 +91,15 @@ class M5Data:
         self.abs_means = np.mean(np.abs(self.ts_data), axis=1).reshape((-1, 1))
         self.ts_data = self.ts_data / self.abs_means
     
-    def variation_scaling(self):
+    def variation_scaling_A(self):
         self.variations = self.ts_data[:, 1:] - self.ts_data[:, :-1]
         self.variations = np.mean(self.variations**2, axis=1)
         self.variations = np.sqrt(self.variations).reshape((-1, 1))
+        self.ts_data = self.ts_data / self.variations
+    
+    def variation_scaling_B(self):
+        self.variations = np.abs(self.ts_data[:, 1:] - self.ts_data[:, :-1])
+        self.variations = np.mean(self.variations, axis=1).reshape((-1, 1))
         self.ts_data = self.ts_data / self.variations
 
     def generator(self, train):

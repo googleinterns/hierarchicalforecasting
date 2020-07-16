@@ -19,8 +19,10 @@ def main(_):
     else:
         raise ValueError(f'Unknown dataset {flags.dataset}')
 
-    if flags.model == 'dfrnn':
-        model = models.DFRNN(num_ts=data.num_ts, train_weights=train_weights)
+    if flags.model == 'simplernn':
+        model = models.SimpleRNN(num_ts=data.num_ts, train_weights=train_weights)
+    elif flags.model == 'probrnn':
+        model = models.ProbRNN(num_ts=data.num_ts, train_weights=train_weights)
     else:
         raise ValueError(f'Unknown model {flags.model}')
     
