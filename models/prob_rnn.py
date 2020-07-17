@@ -53,16 +53,7 @@ class ProbRNN(keras.Model):
 
     @tf.function
     def get_local(self, feats, y_prev):
-        
-
-    @tf.function
-    def call(self, feats, y_prev):
-        '''
-        feats: t x d
-        y_prev: t x n
-        '''
-
-        # Computing local effects
+         # Computing local effects
         y_feats = tf.expand_dims(y_prev, -1)  # t x n x 1
         stat_feats = tf.expand_dims(feats, axis=1)  # t x 1 x d
         stat_feats = tf.repeat(stat_feats, repeats=self.num_ts, axis=1)  # t x n x d
@@ -79,15 +70,25 @@ class ProbRNN(keras.Model):
         mean = self.dense_mean(mean_outputs)  # n x 1
         mean = tf.squeeze(mean, axis=-1)
         mean = mean * self.scale + self.bias  # n
-        mean = tf.math.softplus(mean)  # n
 
         sig_outputs = self.lstm_var(local_feats)  # n x h
         sig = self.dense_var(sig_outputs)  # n x 1
         sig = tf.squeeze(sig, axis=-1)
         sig = sig * self.scale  # n
-        sig = tf.math.softplus(sig)  # n
 
-        return mean, sig
+    @tf.function
+    def call(self, feats, y_prev):
+        '''
+        feats: t x d
+        y_prev: t x n
+        '''
+        mean, sig = self.get_local(feats, y_prev)
+
+        if flags.use_global_model:
+            global_effect = self.get_global(feats, y_prev)
+            mean = mean + global_effect
+
+        return tf.math.softplus(mean), tf.math.softplus(sig)
     
     @tf.function
     def train_step(self, feats, y_obs, optimizer):

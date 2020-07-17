@@ -107,7 +107,7 @@ class M5Data:
         cont_len = flags.cont_len
         tot_len = NUM_TIME_STEPS - 30
         if train:
-            num_data = tot_len - pred_hor - cont_len
+            num_data = tot_len - pred_hor - 2 * cont_len
             for i in range(num_data):
                 sub_ts = self.ts_data[:, i:i+cont_len+1]
                 sub_feat = self.feats[:, i:i+cont_len+1]

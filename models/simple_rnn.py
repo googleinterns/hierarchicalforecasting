@@ -35,7 +35,7 @@ class SimpleRNN(keras.Model):
             self.lstm_global = layers.LSTM(flags.global_lstm_hidden,
                             return_sequences=False, time_major=True)
             self.feat_emb_global = layers.Dense(flags.feat_dim_global, activation='tanh')
-            self.dense_global = layers.Dense(self.num_ts)
+            self.dense_loading = layers.Dense(flags.global_lstm_hidden, use_bias=False)
     
     @tf.function
     def get_local(self, feats, y_prev):
@@ -44,26 +44,28 @@ class SimpleRNN(keras.Model):
         stat_feats = tf.repeat(stat_feats, repeats=self.num_ts, axis=1)  # t x n x d
         
         idx = tf.range(self.num_ts)  # n
-        idx = tf.expand_dims(idx, axis=0)  # 1 x n
-        idx = tf.repeat(idx, repeats=self.time_steps, axis=0)  # t x n
-        node_emb = self.emb(idx)  # t x n x e
+        raw_emb = self.emb(idx) # n x e
+        emb = tf.expand_dims(raw_emb, axis=0)  # 1 x n x e
+        emb = tf.repeat(emb, repeats=self.time_steps, axis=0)  # t x n x e
 
-        local_feats = tf.concat([y_feats, stat_feats, node_emb], axis=-1)  # t x n x D'
+        local_feats = tf.concat([y_feats, stat_feats, emb], axis=-1)  # t x n x D'
         local_feats = self.feat_emb(local_feats)  # t x n x e
         outputs = self.lstm(local_feats)  # n x h
         local_effect = self.dense(outputs)  # n x 1
         local_effect = tf.squeeze(local_effect, axis=-1)
         local_effect = local_effect * self.scale + self.bias  # n
-        return local_effect
+        return local_effect, raw_emb
     
     @tf.function
-    def get_global(self, feats, y_prev):
+    def get_global(self, feats, y_prev, loadings):
+        ''' loadings: n x h '''
         y_feats = tf.expand_dims(y_prev, 1)  # t x 1 x n
         stat_feats = tf.expand_dims(feats, axis=1)  # t x 1 x d
         global_feats = tf.concat([y_feats, stat_feats], axis=-1)  # t x 1 x D
+        global_feats = self.feat_emb_global(global_feats)
         outputs = self.lstm_global(global_feats)  # 1 x h
-        global_effect = self.dense_global(outputs)  # 1 x n
-        global_effect = tf.squeeze(global_effect, 0)
+        global_effect = tf.matmul(loadings, tf.transpose(outputs))  # n x 1
+        global_effect = tf.squeeze(global_effect, 1)
         return global_effect
 
     @tf.function
@@ -74,19 +76,21 @@ class SimpleRNN(keras.Model):
         '''
 
         # Computing local effects
-        local_effect = self.get_local(feats, y_prev)
+        local_effect, emb = self.get_local(feats, y_prev)
         final_output = local_effect  # n
+        # final_output = 0
         if flags.use_global_model:
-            final_output = final_output + self.get_global(feats, y_prev)
-        final_output = tf.math.softplus(final_output)  # n
+            loadings = self.dense_loading(emb)  # n x h
+            final_output = final_output + self.get_global(feats, y_prev, loadings)
+        # final_output = tf.math.softplus(final_output)  # n
         return final_output
     
     @tf.function
     def train_step(self, feats, y_obs, optimizer):
         with tf.GradientTape() as tape:
             pred = self(feats[1:], y_obs[:-1])
-            # loss = tf.reduce_sum(tf.abs(pred - y_obs[-1]) * self.train_weights)
-            loss = tf.reduce_mean(tf.abs(pred - y_obs[-1]))
+            loss = tf.reduce_sum(tf.abs(pred - y_obs[-1]) * self.train_weights)
+            # loss = tf.reduce_mean(tf.abs(pred - y_obs[-1]))
 
         grads = tape.gradient(loss, self.trainable_variables)
         optimizer.apply_gradients(zip(grads, self.trainable_variables))

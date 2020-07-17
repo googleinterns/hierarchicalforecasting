@@ -63,7 +63,6 @@ def main(_):
             # Train metrics
             summary.update({
                 'train/loss': loss,
-                'train/rmse': tf.sqrt(loss)
             })
             if i % 100 == 0:
                 mean_loss = summary.metric_dict['train/loss'].result().numpy()
