@@ -39,16 +39,26 @@ class ProbRNN(keras.Model):
             self.lstm_global = layers.LSTM(flags.global_lstm_hidden,
                             return_sequences=False, time_major=True)
             self.feat_emb_global = layers.Dense(flags.feat_dim_global, activation='tanh')
-            self.dense_global = layers.Dense(self.num_ts)
+            self.dense_loading = layers.Dense(flags.global_lstm_hidden, use_bias=False)
+    
+    @tf.function
+    def get_emb(self):
+        idx = tf.range(self.num_ts)  # n
+        raw_emb = self.emb(idx) # n x e
+        return raw_emb
 
     @tf.function
     def get_global(self, feats, y_prev):
         y_feats = tf.expand_dims(y_prev, 1)  # t x 1 x n
         stat_feats = tf.expand_dims(feats, axis=1)  # t x 1 x d
         global_feats = tf.concat([y_feats, stat_feats], axis=-1)  # t x 1 x D
+        global_feats = self.feat_emb_global(global_feats)
         outputs = self.lstm_global(global_feats)  # 1 x h
-        global_effect = self.dense_global(outputs)  # 1 x n
-        global_effect = tf.squeeze(global_effect, 0)
+
+        emb = self.get_emb()  # n x e
+        loadings = self.dense_loading(emb)  # n x h
+        global_effect = tf.matmul(loadings, tf.transpose(outputs))  # n x 1
+        global_effect = tf.squeeze(global_effect, 1)  # n
         return global_effect
 
     @tf.function
@@ -58,12 +68,11 @@ class ProbRNN(keras.Model):
         stat_feats = tf.expand_dims(feats, axis=1)  # t x 1 x d
         stat_feats = tf.repeat(stat_feats, repeats=self.num_ts, axis=1)  # t x n x d
         
-        idx = tf.range(self.num_ts)  # n
-        idx = tf.expand_dims(idx, axis=0)  # 1 x n
-        idx = tf.repeat(idx, repeats=self.time_steps, axis=0)  # t x n
-        node_emb = self.emb(idx)  # t x n x e
+        emb = self.get_emb()
+        emb = tf.expand_dims(emb, axis=0)  # 1 x n x e
+        emb = tf.repeat(emb, repeats=self.time_steps, axis=0)  # t x n x e
 
-        local_feats = tf.concat([y_feats, stat_feats, node_emb], axis=-1)  # t x n x D'
+        local_feats = tf.concat([y_feats, stat_feats, emb], axis=-1)  # t x n x D'
         local_feats = self.feat_emb(local_feats)  # t x n x e
         
         mean_outputs = self.lstm(local_feats)  # n x h
@@ -75,6 +84,8 @@ class ProbRNN(keras.Model):
         sig = self.dense_var(sig_outputs)  # n x 1
         sig = tf.squeeze(sig, axis=-1)
         sig = sig * self.scale  # n
+
+        return mean, sig
 
     @tf.function
     def call(self, feats, y_prev):
@@ -88,14 +99,15 @@ class ProbRNN(keras.Model):
             global_effect = self.get_global(feats, y_prev)
             mean = mean + global_effect
 
-        return tf.math.softplus(mean), tf.math.softplus(sig)
-    
+        return mean, tf.math.softplus(sig)
+
     @tf.function
     def train_step(self, feats, y_obs, optimizer):
         with tf.GradientTape() as tape:
             mean, sig = self(feats[1:], y_obs[:-1])
             # loss = tf.reduce_sum(tf.abs(pred - y_obs[-1]) * self.train_weights)
-            loss = gaussian_nll(mean, sig, y_obs[-1])
+            nll = gaussian_nll(mean, sig, y_obs[-1])
+            loss = tf.reduce_sum(nll * self.train_weights)
 
         grads = tape.gradient(loss, self.trainable_variables)
         optimizer.apply_gradients(zip(grads, self.trainable_variables))
@@ -169,5 +181,4 @@ def gaussian_nll(mean, sigma, y_obs):
     y_obs: t x n
     '''
     nll = 0.5 * ((y_obs - mean) / sigma)**2 + tf.math.log(sigma)
-    nll = tf.reduce_mean(nll)
     return nll
