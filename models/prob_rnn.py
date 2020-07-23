@@ -6,86 +6,44 @@ import sys
 from tensorflow import keras
 from tensorflow.keras import layers
 from tqdm import tqdm
+from .simple_rnn import SimpleRNN
 
 
 flags = global_flags.FLAGS
 
-class ProbRNN(keras.Model):
+class ProbRNN(SimpleRNN):
+    '''
+    Inherits SimpleRNN and adds variance
+    '''
     def __init__(self, num_ts, train_weights):
-        super(ProbRNN, self).__init__()
+        super().__init__(num_ts, train_weights)
 
-        self.num_ts = num_ts
-        self.time_steps = flags.cont_len
-        self.train_weights = tf.convert_to_tensor(train_weights, dtype=tf.float32)
-
-        self.lstm = layers.LSTM(flags.local_lstm_hidden,
-                            return_sequences=False, time_major=True)
         self.lstm_var = layers.LSTM(flags.var_lstm_hidden,
                             return_sequences=False, time_major=True)
-        self.emb = layers.Embedding(input_dim=self.num_ts,
-                                    output_dim=flags.node_emb_dim)
-        self.feat_emb = layers.Dense(flags.feat_dim_local, activation='tanh')
-        self.dense_mean = layers.Dense(1)
+        self.feat_emb_var = layers.Dense(flags.feat_dim_local, activation='tanh')
         self.dense_var = layers.Dense(1)
-        
-        self.scale = tf.Variable(
-            initial_value=np.ones((self.num_ts)),
-            trainable=True, dtype=tf.float32)
-        self.bias = tf.Variable(
-            initial_value=np.zeros((self.num_ts)),
-            trainable=True, dtype=tf.float32)
-        
-        if flags.use_global_model:
-            self.lstm_global = layers.LSTM(flags.global_lstm_hidden,
-                            return_sequences=False, time_major=True)
-            self.feat_emb_global = layers.Dense(flags.feat_dim_global, activation='tanh')
-            self.dense_loading = layers.Dense(flags.global_lstm_hidden, use_bias=False)
     
     @tf.function
-    def get_emb(self):
-        idx = tf.range(self.num_ts)  # n
-        raw_emb = self.emb(idx) # n x e
-        return raw_emb
-
-    @tf.function
-    def get_global(self, feats, y_prev):
-        y_feats = tf.expand_dims(y_prev, 1)  # t x 1 x n
-        stat_feats = tf.expand_dims(feats, axis=1)  # t x 1 x d
-        global_feats = tf.concat([y_feats, stat_feats], axis=-1)  # t x 1 x D
-        global_feats = self.feat_emb_global(global_feats)
-        outputs = self.lstm_global(global_feats)  # 1 x h
-
-        emb = self.get_emb()  # n x e
-        loadings = self.dense_loading(emb)  # n x h
-        global_effect = tf.matmul(loadings, tf.transpose(outputs))  # n x 1
-        global_effect = tf.squeeze(global_effect, 1)  # n
-        return global_effect
-
-    @tf.function
-    def get_local(self, feats, y_prev):
-         # Computing local effects
+    def get_var(self, feats, y_prev):
+        '''
+        Returns the sqrt of the variance
+        '''
         y_feats = tf.expand_dims(y_prev, -1)  # t x n x 1
         stat_feats = tf.expand_dims(feats, axis=1)  # t x 1 x d
         stat_feats = tf.repeat(stat_feats, repeats=self.num_ts, axis=1)  # t x n x d
         
-        emb = self.get_emb()
+        emb = self.get_node_emb()
         emb = tf.expand_dims(emb, axis=0)  # 1 x n x e
         emb = tf.repeat(emb, repeats=self.time_steps, axis=0)  # t x n x e
 
         local_feats = tf.concat([y_feats, stat_feats, emb], axis=-1)  # t x n x D'
-        local_feats = self.feat_emb(local_feats)  # t x n x e
+        local_feats = self.feat_emb_var(local_feats)  # t x n x e
         
-        mean_outputs = self.lstm(local_feats)  # n x h
-        mean = self.dense_mean(mean_outputs)  # n x 1
-        mean = tf.squeeze(mean, axis=-1)
-        mean = mean * self.scale + self.bias  # n
-
         sig_outputs = self.lstm_var(local_feats)  # n x h
         sig = self.dense_var(sig_outputs)  # n x 1
         sig = tf.squeeze(sig, axis=-1)
-        sig = sig * self.scale  # n
 
-        return mean, sig
+        return tf.math.softplus(sig)
 
     @tf.function
     def call(self, feats, y_prev):
@@ -93,13 +51,14 @@ class ProbRNN(keras.Model):
         feats: t x d
         y_prev: t x n
         '''
-        mean, sig = self.get_local(feats, y_prev)
+        mean = self.get_local(feats, y_prev)
+        sig = self.get_var(feats, y_prev)
 
         if flags.use_global_model:
             global_effect = self.get_global(feats, y_prev)
             mean = mean + global_effect
 
-        return mean, tf.math.softplus(sig)
+        return mean, sig
 
     @tf.function
     def train_step(self, feats, y_obs, optimizer):

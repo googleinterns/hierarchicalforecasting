@@ -11,7 +11,7 @@ flags = global_flags.FLAGS
 
 class SimpleRNN(keras.Model):
     def __init__(self, num_ts, train_weights):
-        super(SimpleRNN, self).__init__()
+        super().__init__()
 
         self.num_ts = num_ts
         self.time_steps = flags.cont_len
@@ -19,14 +19,11 @@ class SimpleRNN(keras.Model):
 
         self.lstm = layers.LSTM(flags.local_lstm_hidden,
                             return_sequences=False, time_major=True)
-        self.emb = layers.Embedding(input_dim=self.num_ts,
+        self.node_emb = layers.Embedding(input_dim=self.num_ts,
                                     output_dim=flags.node_emb_dim)
         self.feat_emb = layers.Dense(flags.feat_dim_local, activation='tanh')
-        self.dense = layers.Dense(1)
         
-        self.scale = tf.Variable(
-            initial_value=np.ones((self.num_ts)),
-            trainable=True, dtype=tf.float32)
+        self.local_loading = layers.Dense(flags.local_lstm_hidden, use_bias=False)
         self.bias = tf.Variable(
             initial_value=np.zeros((self.num_ts)),
             trainable=True, dtype=tf.float32)
@@ -35,7 +32,13 @@ class SimpleRNN(keras.Model):
             self.lstm_global = layers.LSTM(flags.global_lstm_hidden,
                             return_sequences=False, time_major=True)
             self.feat_emb_global = layers.Dense(flags.feat_dim_global, activation='tanh')
-            self.dense_loading = layers.Dense(flags.global_lstm_hidden, use_bias=False)
+            self.global_loading = layers.Dense(flags.global_lstm_hidden, use_bias=False)
+    
+    @tf.function
+    def get_node_emb(self):
+        idx = tf.range(self.num_ts)  # n
+        node_emb = self.node_emb(idx) # n x e
+        return node_emb
     
     @tf.function
     def get_local(self, feats, y_prev):
@@ -43,27 +46,32 @@ class SimpleRNN(keras.Model):
         stat_feats = tf.expand_dims(feats, axis=1)  # t x 1 x d
         stat_feats = tf.repeat(stat_feats, repeats=self.num_ts, axis=1)  # t x n x d
         
-        idx = tf.range(self.num_ts)  # n
-        raw_emb = self.emb(idx) # n x e
-        emb = tf.expand_dims(raw_emb, axis=0)  # 1 x n x e
-        emb = tf.repeat(emb, repeats=self.time_steps, axis=0)  # t x n x e
+        node_emb = self.get_node_emb()
+        # emb = tf.expand_dims(node_emb, axis=0)  # 1 x n x e
+        # emb = tf.repeat(emb, repeats=self.time_steps, axis=0)  # t x n x e
 
-        local_feats = tf.concat([y_feats, stat_feats, emb], axis=-1)  # t x n x D'
+        local_feats = tf.concat([y_feats, stat_feats], axis=-1)  # t x n x D'
+        # removed emb from local feats
+
         local_feats = self.feat_emb(local_feats)  # t x n x e
         outputs = self.lstm(local_feats)  # n x h
-        local_effect = self.dense(outputs)  # n x 1
-        local_effect = tf.squeeze(local_effect, axis=-1)
-        local_effect = local_effect * self.scale + self.bias  # n
-        return local_effect, raw_emb
+        loadings = self.local_loading(node_emb)  # n x h
+
+        local_effect = tf.reduce_sum(outputs * loadings, axis=1)  # n
+        local_effect = local_effect + self.bias  # n
+        return local_effect
     
     @tf.function
-    def get_global(self, feats, y_prev, loadings):
+    def get_global(self, feats, y_prev):
         ''' loadings: n x h '''
         y_feats = tf.expand_dims(y_prev, 1)  # t x 1 x n
         stat_feats = tf.expand_dims(feats, axis=1)  # t x 1 x d
         global_feats = tf.concat([y_feats, stat_feats], axis=-1)  # t x 1 x D
         global_feats = self.feat_emb_global(global_feats)
         outputs = self.lstm_global(global_feats)  # 1 x h
+
+        node_emb = self.get_node_emb()  # n x e
+        loadings = self.global_loading(node_emb)  # n x h
         global_effect = tf.matmul(loadings, tf.transpose(outputs))  # n x 1
         global_effect = tf.squeeze(global_effect, 1)
         return global_effect
@@ -76,12 +84,11 @@ class SimpleRNN(keras.Model):
         '''
 
         # Computing local effects
-        local_effect, emb = self.get_local(feats, y_prev)
+        local_effect = self.get_local(feats, y_prev)
         final_output = local_effect  # n
         # final_output = 0
         if flags.use_global_model:
-            loadings = self.dense_loading(emb)  # n x h
-            final_output = final_output + self.get_global(feats, y_prev, loadings)
+            final_output = final_output + self.get_global(feats, y_prev)
         # final_output = tf.math.softplus(final_output)  # n
         return final_output
     
@@ -109,7 +116,7 @@ class SimpleRNN(keras.Model):
         pred_path = y_prev
         
         for i in range(pred_hor):
-            pred = self.call(feats[i:i+cont_len],pred_path[i:i+cont_len])
+            pred = self(feats[i:i+cont_len],pred_path[i:i+cont_len])
             pred = np.clip(pred.numpy(), a_min=0, a_max=None).reshape((1, -1))
             pred_path = np.concatenate([pred_path, pred], axis=0)
         
