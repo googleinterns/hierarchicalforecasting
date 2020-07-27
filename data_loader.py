@@ -7,7 +7,7 @@ import global_flags
 
 from absl import app
 from tqdm import tqdm
-from sklearn.preprocessing import OneHotEncoder, minmax_scale
+from sklearn.preprocessing import OrdinalEncoder, minmax_scale
 
 flags = global_flags.FLAGS
 
@@ -30,8 +30,9 @@ class M5Data:
         try:
             with open(pkl_path, 'rb') as fin:
                 print('Found pickle. Loading ...')
-                self.tree, self.num_ts, self.ts_data, self.feats = \
-                    pickle.load(fin)
+                self.tree, self.num_ts, self.ts_data, \
+                    (self.global_cont_feats, self.global_cat_feats, self.global_cat_dims) \
+                        = pickle.load(fin)
         except FileNotFoundError:
             print('Pickle not found. Reading from csv ...')
             df = pd.read_csv(data_path, ',')
@@ -55,27 +56,30 @@ class M5Data:
                 a_ids = self.tree.get_ancestor_ids(node_str)
                 ts = np.asarray(row[d_1_idx : d_n_idx+1])
                 self.ts_data[a_ids] += ts
+            self.ts_data = self.ts_data.T
             
             features = pd.read_csv(feats_path, ',')
-            feats_1 = np.asarray(
+            feats = np.asarray(
                 features[['wday', 'month', 'snap_CA', 'snap_TX', 'snap_WI']]\
                     [:NUM_TIME_STEPS])
-            feats_1 = minmax_scale(feats_1)
+            feats = minmax_scale(feats)
+            self.global_cont_feats = np.asarray(feats, dtype=np.float32)
 
-            feats_2 = features['event_type_1'][:NUM_TIME_STEPS]
-            cats = list(feats_2.unique())
-            cats.remove(np.nan)
+            self.global_cat_feats = []
+            self.global_cat_dims = []
 
-            feats_2 = [[''] if isinstance(f, float) else [f] for f in feats_2]
-            enc = OneHotEncoder(categories=[cats,], handle_unknown='ignore', sparse=False)
-            feats_2 = enc.fit_transform(feats_2)
+            cat_feat_list = ['event_name_1', 'event_type_1']
+            for cat_feat_name in cat_feat_list:
+                feats = features[cat_feat_name][:NUM_TIME_STEPS].fillna('')
+                feats = [[feat] for feat in feats]
+                enc = OrdinalEncoder(dtype=np.int32)
+                feats = enc.fit_transform(feats)
+                self.global_cat_feats.append(np.asarray(feats, dtype=np.int32).ravel())
+                self.global_cat_dims.append(len(enc.categories_[0]))
 
-            self.feats = np.concatenate([feats_1, feats_2], axis=1)
-            self.feats = self.feats.astype(np.float32)
-            self.feats = self.feats.T
-
+            feats = (self.global_cont_feats, self.global_cat_feats, self.global_cat_dims)
             with open(pkl_path, 'wb') as fout:
-                pickle.dump((self.tree, self.num_ts, self.ts_data, self.feats),
+                pickle.dump((self.tree, self.num_ts, self.ts_data, feats),
                             fout)
     
     @property
@@ -88,46 +92,51 @@ class M5Data:
         return w
 
     def mean_scaling(self):
-        self.abs_means = np.mean(np.abs(self.ts_data), axis=1).reshape((-1, 1))
+        self.abs_means = np.mean(np.abs(self.ts_data), axis=0).reshape((1, -1))
         self.ts_data = self.ts_data / self.abs_means
     
     def variation_scaling_A(self):
-        self.variations = self.ts_data[:, 1:] - self.ts_data[:, :-1]
-        self.variations = np.mean(self.variations**2, axis=1)
-        self.variations = np.sqrt(self.variations).reshape((-1, 1))
+        self.variations = self.ts_data[1:] - self.ts_data[:-1]
+        self.variations = np.mean(self.variations**2, axis=0)
+        self.variations = np.sqrt(self.variations).reshape((1, -1))
         self.ts_data = self.ts_data / self.variations
     
     def variation_scaling_B(self):
-        self.variations = np.abs(self.ts_data[:, 1:] - self.ts_data[:, :-1])
-        self.variations = np.mean(self.variations, axis=1).reshape((-1, 1))
+        self.variations = np.abs(self.ts_data[1:] - self.ts_data[:-1])
+        self.variations = np.mean(self.variations, axis=0).reshape((1, -1))
         self.ts_data = self.ts_data / self.variations
 
     def generator(self, train):
         pred_hor = flags.pred_hor
         cont_len = flags.cont_len
-        tot_len = NUM_TIME_STEPS - 30
+        tot_len = NUM_TIME_STEPS - 28  # Offsetting by 28
         if train:
             num_data = tot_len - pred_hor - 2 * cont_len
             for i in range(num_data):
-                sub_ts = self.ts_data[:, i:i+cont_len+1]
-                sub_feat = self.feats[:, i:i+cont_len+1]
-                yield sub_feat.T, sub_ts.T  # t x *
+                sub_ts = self.ts_data[i:i+cont_len+1]
+                sub_feat_cont = self.global_cont_feats[i:i+cont_len+1]
+                sub_feat_cat = tuple(
+                    feat[i:i+cont_len+1] for feat in self.global_cat_feats
+                )
+                yield (sub_feat_cont, sub_feat_cat), sub_ts  # t x *
         else:
             start_idx = tot_len - pred_hor - cont_len
-            sub_ts = self.ts_data[:, start_idx:tot_len]
-            sub_feat = self.feats[:, start_idx:tot_len]
+            sub_ts = self.ts_data[start_idx:tot_len]
+            sub_feat_cont = self.global_cont_feats[start_idx:tot_len]
+            sub_feat_cat = tuple(
+                feat[start_idx:tot_len] for feat in self.global_cat_feats
+            )
             for i in range(1):
-                yield sub_feat.T, sub_ts.T  # t x *
+                yield (sub_feat_cont, sub_feat_cat), sub_ts  # t x *
 
     def tf_dataset(self, train):
         # length = flags.cont_len + 1
         dataset = tf.data.Dataset.from_generator(
             lambda: self.generator(train),
-            (tf.float32, tf.float32),
-            # (
-            #     tf.TensorShape([length, self.feats.shape[0]]),
-            #     tf.TensorShape([length, self.ts_data.shape[0]])
-            # )
+            (
+                (tf.float32, (tf.int32, tf.int32)),
+                tf.float32
+            )
         ).shuffle(2000).prefetch(tf.data.experimental.AUTOTUNE)
         return dataset
 
@@ -220,21 +229,22 @@ def main(_):
     print(tree.id_node)
 
     data = M5Data()
-    print(data.ts_data.dtype)
-    print(data.feats.dtype)
-    print(data.ts_data.shape)
-    print(data.feats.shape)
+    print(data.ts_data.dtype, data.ts_data.shape)
 
-    for d in data.generator(True):
-        print(d[0].shape, d[1].shape)
-        break
+    # for d in data.generator(True):
+    #     print(d[0].shape, d[1].shape)
+    #     break
 
-    for d in data.generator(False):
-        print(d[0].shape, d[1].shape)
+    # for d in data.generator(False):
+    #     print(d[0].shape, d[1].shape)
 
     dataset = data.tf_dataset(True)
     for d in dataset:
-        print(d)
+        feats = d[0]
+        y_obs = d[1]
+        print(feats[0].shape)
+        print(feats[1][0].shape, feats[1][1].shape)
+        print(y_obs.shape)
         break
 
     print(data.weights)

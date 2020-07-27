@@ -20,9 +20,11 @@ def main(_):
         raise ValueError(f'Unknown dataset {flags.dataset}')
 
     if flags.model == 'simplernn':
-        model = models.SimpleRNN(num_ts=data.num_ts, train_weights=train_weights)
+        model = models.SimpleRNN(
+            num_ts=data.num_ts, train_weights=train_weights, cat_dims=data.global_cat_dims)
     elif flags.model == 'probrnn':
-        model = models.ProbRNN(num_ts=data.num_ts, train_weights=train_weights)
+        model = models.ProbRNN(
+            num_ts=data.num_ts, train_weights=train_weights, cat_dims=data.global_cat_dims)
     else:
         raise ValueError(f'Unknown model {flags.model}')
     
@@ -31,7 +33,7 @@ def main(_):
 
     step = tf.Variable(0)
     sch = keras.optimizers.schedules.PiecewiseConstantDecay(
-        boundaries=[8, 14], values=[1e-3, 1e-4, 1e-5])
+        boundaries=[8, 20], values=[1e-3, 1e-4, 1e-5])
     optimizer = keras.optimizers.Adam()
 
     ckpt = tf.train.Checkpoint(step=step, optimizer=optimizer,

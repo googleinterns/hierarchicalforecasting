@@ -8,20 +8,29 @@ from tensorflow.keras import layers
 
 
 flags = global_flags.FLAGS
+MAX_FEAT_EMB_DIM = 50
+
 
 class SimpleRNN(keras.Model):
-    def __init__(self, num_ts, train_weights):
+    def __init__(self, num_ts, train_weights, cat_dims):
         super().__init__()
 
         self.num_ts = num_ts
         self.time_steps = flags.cont_len
         self.train_weights = tf.convert_to_tensor(train_weights, dtype=tf.float32)
+        self.cat_dims = cat_dims
+
+        self.node_emb = layers.Embedding(input_dim=self.num_ts,
+                                    output_dim=flags.node_emb_dim)
+        self.embs = [
+            layers.Embedding(input_dim=dim, output_dim=min(MAX_FEAT_EMB_DIM, (dim+1)//2))
+            for dim in self.cat_dims
+        ]
 
         self.lstm = layers.LSTM(flags.local_lstm_hidden,
                             return_sequences=False, time_major=True)
-        self.node_emb = layers.Embedding(input_dim=self.num_ts,
-                                    output_dim=flags.node_emb_dim)
-        self.feat_emb = layers.Dense(flags.feat_dim_local, activation='tanh')
+
+        self.feat_trans = layers.Dense(flags.feat_dim_local, activation='tanh')
         
         self.local_loading = layers.Dense(flags.local_lstm_hidden, use_bias=False)
         self.bias = tf.Variable(
@@ -31,7 +40,7 @@ class SimpleRNN(keras.Model):
         if flags.use_global_model:
             self.lstm_global = layers.LSTM(flags.global_lstm_hidden,
                             return_sequences=False, time_major=True)
-            self.feat_emb_global = layers.Dense(flags.feat_dim_global, activation='tanh')
+            self.feat_trans_global = layers.Dense(flags.feat_dim_global, activation='tanh')
             self.global_loading = layers.Dense(flags.global_lstm_hidden, use_bias=False)
     
     @tf.function
@@ -39,6 +48,18 @@ class SimpleRNN(keras.Model):
         idx = tf.range(self.num_ts)  # n
         node_emb = self.node_emb(idx) # n x e
         return node_emb
+
+    @tf.function
+    def assemble_feats(self, feats):
+
+        feats_cont = feats[0]  # t x d
+        feats_cat = feats[1]  # [t, t]
+        feats_emb = [
+            emb(feat) for emb, feat in zip(self.embs, feats_cat)  # t x e
+        ]
+        all_feats = feats_emb + [feats_cont]  # [t x *]
+        all_feats = tf.concat(all_feats, axis=-1)
+        return all_feats
     
     @tf.function
     def get_local(self, feats, y_prev):
@@ -53,7 +74,7 @@ class SimpleRNN(keras.Model):
         local_feats = tf.concat([y_feats, stat_feats], axis=-1)  # t x n x D'
         # removed emb from local feats
 
-        local_feats = self.feat_emb(local_feats)  # t x n x e
+        local_feats = self.feat_trans(local_feats)  # t x n x e
         outputs = self.lstm(local_feats)  # n x h
         loadings = self.local_loading(node_emb)  # n x h
 
@@ -67,7 +88,7 @@ class SimpleRNN(keras.Model):
         y_feats = tf.expand_dims(y_prev, 1)  # t x 1 x n
         stat_feats = tf.expand_dims(feats, axis=1)  # t x 1 x d
         global_feats = tf.concat([y_feats, stat_feats], axis=-1)  # t x 1 x D
-        global_feats = self.feat_emb_global(global_feats)
+        global_feats = self.feat_trans_global(global_feats)
         outputs = self.lstm_global(global_feats)  # 1 x h
 
         node_emb = self.get_node_emb()  # n x e
@@ -82,11 +103,11 @@ class SimpleRNN(keras.Model):
         feats: t x d
         y_prev: t x n
         '''
+        feats = self.assemble_feats(feats)  # t x d
 
         # Computing local effects
         local_effect = self.get_local(feats, y_prev)
         final_output = local_effect  # n
-        # final_output = 0
         if flags.use_global_model:
             final_output = final_output + self.get_global(feats, y_prev)
         # final_output = tf.math.softplus(final_output)  # n
@@ -95,7 +116,10 @@ class SimpleRNN(keras.Model):
     @tf.function
     def train_step(self, feats, y_obs, optimizer):
         with tf.GradientTape() as tape:
-            pred = self(feats[1:], y_obs[:-1])
+            pred = self(
+                self.get_sub_feats(feats, 1),
+                y_obs[:-1]
+            )
             loss = tf.reduce_sum(tf.abs(pred - y_obs[-1]) * self.train_weights)
             # loss = tf.reduce_mean(tf.abs(pred - y_obs[-1]))
 
@@ -116,7 +140,10 @@ class SimpleRNN(keras.Model):
         pred_path = y_prev
         
         for i in range(pred_hor):
-            pred = self(feats[i:i+cont_len],pred_path[i:i+cont_len])
+            pred = self(
+                self.get_sub_feats(feats, i, i+cont_len),
+                pred_path[i:i+cont_len]
+            )
             pred = np.clip(pred.numpy(), a_min=0, a_max=None).reshape((1, -1))
             pred_path = np.concatenate([pred_path, pred], axis=0)
         
@@ -127,13 +154,15 @@ class SimpleRNN(keras.Model):
         pred_hor = flags.pred_hor
 
         for feats, y_obs in dataset:
-            feats = feats.numpy()
             y_obs = y_obs.numpy()
             
             assert(y_obs.shape[0] == cont_len + pred_hor)
-            assert(feats.shape[0] == cont_len + pred_hor)
+            assert(feats[0].numpy().shape[0] == cont_len + pred_hor)
 
-            y_pred = self.forecast(feats[1:], y_obs[:cont_len])
+            y_pred = self.forecast(
+                self.get_sub_feats(feats, 1),
+                y_obs[:cont_len]
+            )
             diff = np.square(y_pred - y_obs[-pred_hor:])
             rmse = np.sqrt(np.mean(diff, axis=0))
 
@@ -148,3 +177,10 @@ class SimpleRNN(keras.Model):
 
         np.save('notebooks/evals.npy', y_pred)
         return return_dict
+
+    @staticmethod
+    def get_sub_feats(feats, start, end=None):
+        return (
+            feats[0][start:end],
+            [feat[start:end] for feat in feats[1]],
+        )
