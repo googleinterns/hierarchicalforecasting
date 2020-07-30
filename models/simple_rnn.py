@@ -74,7 +74,7 @@ class SimpleRNN(keras.Model):
         local_feats = tf.concat([y_feats, stat_feats], axis=-1)  # t x n x D'
         # removed emb from local feats
 
-        local_feats = self.feat_trans(local_feats)  # t x n x e
+        # local_feats = self.feat_trans(local_feats)  # t x n x e
         outputs = self.lstm(local_feats)  # n x h
         loadings = self.local_loading(node_emb)  # n x h
 
@@ -88,7 +88,7 @@ class SimpleRNN(keras.Model):
         y_feats = tf.expand_dims(y_prev, 1)  # t x 1 x n
         stat_feats = tf.expand_dims(feats, axis=1)  # t x 1 x d
         global_feats = tf.concat([y_feats, stat_feats], axis=-1)  # t x 1 x D
-        global_feats = self.feat_trans_global(global_feats)
+        # global_feats = self.feat_trans_global(global_feats)
         outputs = self.lstm_global(global_feats)  # 1 x h
 
         node_emb = self.get_node_emb()  # n x e

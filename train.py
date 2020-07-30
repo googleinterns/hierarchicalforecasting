@@ -33,7 +33,7 @@ def main(_):
 
     step = tf.Variable(0)
     sch = keras.optimizers.schedules.PiecewiseConstantDecay(
-        boundaries=[8, 20], values=[1e-3, 1e-4, 1e-5])
+        boundaries=[8, 18, 25], values=[1e-3, 1e-4, 1e-5, 1e-6])
     optimizer = keras.optimizers.Adam()
 
     ckpt = tf.train.Checkpoint(step=step, optimizer=optimizer,
@@ -49,10 +49,12 @@ def main(_):
     
     summary = Summary(expt_dir)
 
-    eval_dict = model.eval(data.tf_dataset(train=False), data.tree.levels)
-    print(eval_dict)
-    summary.update(eval_dict)
-    summary.write(step=step.numpy())
+    # eval_dict = model.eval(data.tf_dataset(train=False), data.tree.levels)
+    # print(eval_dict)
+    # summary.update(eval_dict)
+    # summary.write(step=step.numpy())
+
+    print('*** GLOBAL MODEL:', flags.use_global_model)
 
     while step.numpy() < flags.train_epochs:
         ep = step.numpy()
