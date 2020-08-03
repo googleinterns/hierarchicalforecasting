@@ -20,9 +20,9 @@ class ProbRNN(SimpleRNN):
 
         self.lstm_var = layers.LSTM(flags.var_lstm_hidden,
                             return_sequences=False, time_major=True)
-        self.feat_emb_var = layers.Dense(flags.feat_dim_local, activation='tanh')
         self.dense_var = layers.Dense(1)
     
+    # TODO: update the feature processing step
     @tf.function
     def get_var(self, feats, y_prev):
         '''
@@ -37,7 +37,6 @@ class ProbRNN(SimpleRNN):
         emb = tf.repeat(emb, repeats=self.time_steps, axis=0)  # t x n x e
 
         local_feats = tf.concat([y_feats, stat_feats, emb], axis=-1)  # t x n x D'
-        local_feats = self.feat_emb_var(local_feats)  # t x n x e
         
         sig_outputs = self.lstm_var(local_feats)  # n x h
         sig = self.dense_var(sig_outputs)  # n x 1
@@ -64,7 +63,6 @@ class ProbRNN(SimpleRNN):
     def train_step(self, feats, y_obs, optimizer):
         with tf.GradientTape() as tape:
             mean, sig = self(feats[1:], y_obs[:-1])
-            # loss = tf.reduce_sum(tf.abs(pred - y_obs[-1]) * self.train_weights)
             nll = gaussian_nll(mean, sig, y_obs[-1])
             loss = tf.reduce_sum(nll * self.train_weights)
 

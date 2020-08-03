@@ -6,7 +6,7 @@ flags.DEFINE_string('model', 'simplernn', 'The name of the experiment dir')
 
 flags.DEFINE_string('m5dir', './data/m5', 'Path to the m5 data directory')
 
-flags.DEFINE_boolean('use_global_model', True, 'True if using global model')
+flags.DEFINE_boolean('use_global_model', False, 'True if using global model')
 
 flags.DEFINE_integer('train_epochs', 30, 'Number of epochs to train')
 

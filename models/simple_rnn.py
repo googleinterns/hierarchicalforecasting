@@ -12,13 +12,21 @@ MAX_FEAT_EMB_DIM = 50
 
 
 class SimpleRNN(keras.Model):
-    def __init__(self, num_ts, train_weights, cat_dims):
+    def __init__(self, num_ts, train_weights, cat_dims, leaf_matrix=None):
+        print('INIT SRNN')
         super().__init__()
 
         self.num_ts = num_ts
         self.time_steps = flags.cont_len
         self.train_weights = tf.convert_to_tensor(train_weights, dtype=tf.float32)
         self.cat_dims = cat_dims
+        
+        self.leaf_matrix = leaf_matrix
+        if leaf_matrix is not None:
+            num_leaves = np.sum(leaf_matrix, axis=1, keepdims=True)
+            self.leaf_matrix = leaf_matrix / num_leaves
+        # self.leaf_matrix = np.identity(3060, dtype=np.float32)
+        print(self.leaf_matrix)
 
         self.node_emb = layers.Embedding(input_dim=self.num_ts,
                                     output_dim=flags.node_emb_dim)
@@ -29,8 +37,6 @@ class SimpleRNN(keras.Model):
 
         self.lstm = layers.LSTM(flags.local_lstm_hidden,
                             return_sequences=False, time_major=True)
-
-        self.feat_trans = layers.Dense(flags.feat_dim_local, activation='tanh')
         
         self.local_loading = layers.Dense(flags.local_lstm_hidden, use_bias=False)
         self.bias = tf.Variable(
@@ -40,13 +46,15 @@ class SimpleRNN(keras.Model):
         if flags.use_global_model:
             self.lstm_global = layers.LSTM(flags.global_lstm_hidden,
                             return_sequences=False, time_major=True)
-            self.feat_trans_global = layers.Dense(flags.feat_dim_global, activation='tanh')
             self.global_loading = layers.Dense(flags.global_lstm_hidden, use_bias=False)
     
     @tf.function
     def get_node_emb(self):
+        print('CALL A')
         idx = tf.range(self.num_ts)  # n
         node_emb = self.node_emb(idx) # n x e
+        if self.leaf_matrix is not None:
+            node_emb = tf.matmul(self.leaf_matrix, node_emb)
         return node_emb
 
     @tf.function
@@ -68,13 +76,10 @@ class SimpleRNN(keras.Model):
         stat_feats = tf.repeat(stat_feats, repeats=self.num_ts, axis=1)  # t x n x d
         
         node_emb = self.get_node_emb()
-        # emb = tf.expand_dims(node_emb, axis=0)  # 1 x n x e
-        # emb = tf.repeat(emb, repeats=self.time_steps, axis=0)  # t x n x e
 
         local_feats = tf.concat([y_feats, stat_feats], axis=-1)  # t x n x D'
         # removed emb from local feats
 
-        # local_feats = self.feat_trans(local_feats)  # t x n x e
         outputs = self.lstm(local_feats)  # n x h
         loadings = self.local_loading(node_emb)  # n x h
 
@@ -88,7 +93,6 @@ class SimpleRNN(keras.Model):
         y_feats = tf.expand_dims(y_prev, 1)  # t x 1 x n
         stat_feats = tf.expand_dims(feats, axis=1)  # t x 1 x d
         global_feats = tf.concat([y_feats, stat_feats], axis=-1)  # t x 1 x D
-        # global_feats = self.feat_trans_global(global_feats)
         outputs = self.lstm_global(global_feats)  # 1 x h
 
         node_emb = self.get_node_emb()  # n x e
@@ -184,3 +188,20 @@ class SimpleRNN(keras.Model):
             feats[0][start:end],
             [feat[start:end] for feat in feats[1]],
         )
+
+class HierarchicalSimpleRNN(SimpleRNN):
+    def __init__(self, num_ts, train_weights, cat_dims, leaf_matrix):
+        print('INIT HSRNN')
+        super(HierarchicalSimpleRNN, self).__init__(num_ts, train_weights, cat_dims)
+        # num_leaves = np.sum(leaf_matrix, axis=1, keepdims=True)
+        # self.leaf_matrix = leaf_matrix / num_leaves
+        self.leaf_matrix = np.identity(3060, dtype=np.float32)
+        print(self.leaf_matrix)
+
+    # @tf.function
+    # def get_node_emb(self):
+    #     print('CALL B')
+    #     idx = tf.range(self.num_ts)  # n
+    #     node_emb = self.node_emb(idx) # n x e
+    #     # node_emb = tf.matmul(self.leaf_matrix, node_emb)
+    #     return node_emb

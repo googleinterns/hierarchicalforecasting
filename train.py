@@ -21,7 +21,12 @@ def main(_):
 
     if flags.model == 'simplernn':
         model = models.SimpleRNN(
-            num_ts=data.num_ts, train_weights=train_weights, cat_dims=data.global_cat_dims)
+            num_ts=data.num_ts, train_weights=train_weights, cat_dims=data.global_cat_dims,
+            leaf_matrix=data.tree.leaf_matrix)
+    elif flags.model == 'hsrnn':
+        model = models.HierarchicalSimpleRNN(
+            num_ts=data.num_ts, train_weights=train_weights, cat_dims=data.global_cat_dims,
+            leaf_matrix=data.tree.leaf_matrix)
     elif flags.model == 'probrnn':
         model = models.ProbRNN(
             num_ts=data.num_ts, train_weights=train_weights, cat_dims=data.global_cat_dims)

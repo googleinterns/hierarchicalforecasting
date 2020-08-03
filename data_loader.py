@@ -41,8 +41,7 @@ class M5Data:
             col_name = 'item_id' # 'dept_id'
             for item_id in df[col_name]:
                 self.tree.insert_seq(item_id)
-            self.tree.init_leaf_count()
-            self.tree.init_levels()
+            self.tree.precompute()
             
             self.num_ts = self.tree.num_nodes
             self.ts_data = np.zeros((self.num_ts, NUM_TIME_STEPS), dtype=np.float32)
@@ -191,19 +190,25 @@ class Tree:
             node = self.parent[node]
         return ids
     
-    def init_leaf_count(self):
-        self.leaf_count = {}
-        tot_leaves = self._count_rec(self.root)
-        print(tot_leaves)
+    def precompute(self):
+        self.init_levels()
+        self.init_leaf_matrix()
     
-    def _count_rec(self, node_str):
-        tot_count = 0
-        for ch in self.children[node_str]:
-            tot_count += self._count_rec(ch)
-        if tot_count == 0:  # No children
-            tot_count += 1
-        self.leaf_count[node_str] = tot_count
-        return tot_count
+    def init_leaf_matrix(self):
+        n = len(self.node_id)
+        self.leaf_matrix = np.zeros((n, n), dtype=np.float32)
+
+        self._leaf_rec(self.root, [])
+    
+    def _leaf_rec(self, node_str, ancestors):
+        nid = self.node_id[node_str]
+        ancestors = ancestors + [nid]
+
+        if len(self.children[node_str]) == 0:  # leaf
+            self.leaf_matrix[ancestors, nid] += 1
+        else:
+            for ch in self.children[node_str]:
+                self._leaf_rec(ch, ancestors)
     
     def init_levels(self):
         self.levels = {}
@@ -221,35 +226,33 @@ def main(_):
     tree = Tree()
     tree.insert_seq('food_2_1')
     tree.insert_seq('food_2_2')
-    tree.insert_seq('hobbies_1_100')
+    tree.insert_seq('hobbies_1')
+    tree.insert_seq('hobbies_2')
+
+    tree.precompute()
 
     print(tree.parent)
     print(tree.children)
     print(tree.node_id)
     print(tree.id_node)
 
-    data = M5Data()
-    print(data.ts_data.dtype, data.ts_data.shape)
+    print(tree.leaf_matrix)
 
-    # for d in data.generator(True):
-    #     print(d[0].shape, d[1].shape)
+    # data = M5Data()
+    # print(data.ts_data.dtype, data.ts_data.shape)
+
+    # dataset = data.tf_dataset(True)
+    # for d in dataset:
+    #     feats = d[0]
+    #     y_obs = d[1]
+    #     print(feats[0].shape)
+    #     print(feats[1][0].shape, feats[1][1].shape)
+    #     print(y_obs.shape)
     #     break
 
-    # for d in data.generator(False):
-    #     print(d[0].shape, d[1].shape)
-
-    dataset = data.tf_dataset(True)
-    for d in dataset:
-        feats = d[0]
-        y_obs = d[1]
-        print(feats[0].shape)
-        print(feats[1][0].shape, feats[1][1].shape)
-        print(y_obs.shape)
-        break
-
-    print(data.weights)
-    print(np.sum(data.weights))
-    print(data.weights.shape)
+    # print(data.weights)
+    # print(np.sum(data.weights))
+    # print(data.weights.shape)
 
 
 if __name__ == "__main__":
