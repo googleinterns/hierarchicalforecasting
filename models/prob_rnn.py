@@ -6,12 +6,12 @@ import sys
 from tensorflow import keras
 from tensorflow.keras import layers
 from tqdm import tqdm
-from .simple_rnn import SimpleRNN
+from .simple_rnn import FixedRNN
 
 
 flags = global_flags.FLAGS
 
-class ProbRNN(SimpleRNN):
+class RandomRNN(FixedRNN):
     '''
     Inherits SimpleRNN and adds variance
     '''

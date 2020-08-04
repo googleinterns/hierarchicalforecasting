@@ -1,2 +1,2 @@
-from .simple_rnn import SimpleRNN, HierarchicalSimpleRNN
-from .prob_rnn import ProbRNN
+from .simple_rnn import FixedRNN
+from .prob_rnn import RandomRNN

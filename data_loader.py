@@ -17,10 +17,12 @@ NUM_TIME_STEPS = 1941  # Starts from 1
 class M5Data:
     def __init__(self):
         self.read_data()
-        if flags.model == 'simplernn':
+        if flags.model == 'fixed':
             self.variation_scaling_A()
-        elif flags.model == 'probrnn':
+        elif flags.model == 'random':
             self.variation_scaling_B()
+        else:
+            raise ValueError(f'Unknown model {flags.model}')
 
     def read_data(self):
         data_path = os.path.join(flags.m5dir, 'sales_train_evaluation.csv')

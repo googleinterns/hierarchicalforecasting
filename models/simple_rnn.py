@@ -11,9 +11,8 @@ flags = global_flags.FLAGS
 MAX_FEAT_EMB_DIM = 50
 
 
-class SimpleRNN(keras.Model):
+class FixedRNN(keras.Model):
     def __init__(self, num_ts, train_weights, cat_dims, leaf_matrix=None):
-        print('INIT SRNN')
         super().__init__()
 
         self.num_ts = num_ts
@@ -26,7 +25,6 @@ class SimpleRNN(keras.Model):
             num_leaves = np.sum(leaf_matrix, axis=1, keepdims=True)
             self.leaf_matrix = leaf_matrix / num_leaves
         # self.leaf_matrix = np.identity(3060, dtype=np.float32)
-        print(self.leaf_matrix)
 
         self.node_emb = layers.Embedding(input_dim=self.num_ts,
                                     output_dim=flags.node_emb_dim)
@@ -48,18 +46,14 @@ class SimpleRNN(keras.Model):
                             return_sequences=False, time_major=True)
             self.global_loading = layers.Dense(flags.global_lstm_hidden, use_bias=False)
     
-    @tf.function
     def get_node_emb(self):
-        print('CALL A')
         idx = tf.range(self.num_ts)  # n
         node_emb = self.node_emb(idx) # n x e
-        if self.leaf_matrix is not None:
+        if flags.hierarchy == 'additive':
             node_emb = tf.matmul(self.leaf_matrix, node_emb)
         return node_emb
 
-    @tf.function
     def assemble_feats(self, feats):
-
         feats_cont = feats[0]  # t x d
         feats_cat = feats[1]  # [t, t]
         feats_emb = [
@@ -69,7 +63,6 @@ class SimpleRNN(keras.Model):
         all_feats = tf.concat(all_feats, axis=-1)
         return all_feats
     
-    @tf.function
     def get_local(self, feats, y_prev):
         y_feats = tf.expand_dims(y_prev, -1)  # t x n x 1
         stat_feats = tf.expand_dims(feats, axis=1)  # t x 1 x d
@@ -87,7 +80,6 @@ class SimpleRNN(keras.Model):
         local_effect = local_effect + self.bias  # n
         return local_effect
     
-    @tf.function
     def get_global(self, feats, y_prev):
         ''' loadings: n x h '''
         y_feats = tf.expand_dims(y_prev, 1)  # t x 1 x n
@@ -188,20 +180,3 @@ class SimpleRNN(keras.Model):
             feats[0][start:end],
             [feat[start:end] for feat in feats[1]],
         )
-
-class HierarchicalSimpleRNN(SimpleRNN):
-    def __init__(self, num_ts, train_weights, cat_dims, leaf_matrix):
-        print('INIT HSRNN')
-        super(HierarchicalSimpleRNN, self).__init__(num_ts, train_weights, cat_dims)
-        # num_leaves = np.sum(leaf_matrix, axis=1, keepdims=True)
-        # self.leaf_matrix = leaf_matrix / num_leaves
-        self.leaf_matrix = np.identity(3060, dtype=np.float32)
-        print(self.leaf_matrix)
-
-    # @tf.function
-    # def get_node_emb(self):
-    #     print('CALL B')
-    #     idx = tf.range(self.num_ts)  # n
-    #     node_emb = self.node_emb(idx) # n x e
-    #     # node_emb = tf.matmul(self.leaf_matrix, node_emb)
-    #     return node_emb

@@ -19,22 +19,22 @@ def main(_):
     else:
         raise ValueError(f'Unknown dataset {flags.dataset}')
 
-    if flags.model == 'simplernn':
-        model = models.SimpleRNN(
+    if flags.model == 'fixed':
+        model = models.FixedRNN(
             num_ts=data.num_ts, train_weights=train_weights, cat_dims=data.global_cat_dims,
             leaf_matrix=data.tree.leaf_matrix)
-    elif flags.model == 'hsrnn':
-        model = models.HierarchicalSimpleRNN(
-            num_ts=data.num_ts, train_weights=train_weights, cat_dims=data.global_cat_dims,
-            leaf_matrix=data.tree.leaf_matrix)
-    elif flags.model == 'probrnn':
-        model = models.ProbRNN(
+    elif flags.model == 'random':
+        model = models.RandomRNN(
             num_ts=data.num_ts, train_weights=train_weights, cat_dims=data.global_cat_dims)
     else:
         raise ValueError(f'Unknown model {flags.model}')
     
+    # Form experiment directory
+    model_name = flags.model
+    if flags.hierarchy is not None:
+        model_name += '_' + flags.hierarchy
     expt_dir = os.path.join('./logs',
-        flags.dataset, flags.model, flags.expt)
+        flags.dataset, model_name, flags.expt)
 
     step = tf.Variable(0)
     sch = keras.optimizers.schedules.PiecewiseConstantDecay(
@@ -108,10 +108,6 @@ class Summary:
                 tf.summary.scalar(metric, self.metric_dict[metric].result(), step=step)
         self.metric_dict = {}
         self.writer.flush()
-
-
-# def update_mean(curr_mean, val, old_count):
-#     return curr_mean + (val - curr_mean) / (old_count + 1)
 
 
 if __name__ == "__main__":
