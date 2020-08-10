@@ -15,13 +15,12 @@ def main(_):
 
     if flags.dataset == 'm5':
         data = data_loader.M5Data()
-        train_weights = data.weights
     else:
         raise ValueError(f'Unknown dataset {flags.dataset}')
 
     if flags.model == 'fixed':
         model = models.FixedRNN(
-            num_ts=data.num_ts, train_weights=train_weights, cat_dims=data.global_cat_dims,
+            num_ts=data.num_ts, cat_dims=data.global_cat_dims,
             leaf_matrix=data.tree.leaf_matrix)
     elif flags.model == 'random':
         model = models.RandomRNN(
@@ -38,7 +37,7 @@ def main(_):
 
     step = tf.Variable(0)
     sch = keras.optimizers.schedules.PiecewiseConstantDecay(
-        boundaries=[8, 18, 25], values=[1e-3, 1e-4, 1e-5, 1e-6])
+        boundaries=[15, 25], values=[1e-3, 1e-4, 1e-5])
     optimizer = keras.optimizers.Adam()
 
     ckpt = tf.train.Checkpoint(step=step, optimizer=optimizer,
@@ -59,16 +58,14 @@ def main(_):
     # summary.update(eval_dict)
     # summary.write(step=step.numpy())
 
-    print('*** GLOBAL MODEL:', flags.use_global_model)
-
     while step.numpy() < flags.train_epochs:
         ep = step.numpy()
         print(f'Epoch {ep}')
         optimizer.learning_rate.assign(sch(step))
 
         iterator = tqdm(data.tf_dataset(train=True), mininterval=2)
-        for i, (feats, y_obs) in enumerate(iterator):
-            loss = model.train_step(feats, y_obs, optimizer)
+        for i, (feats, y_obs, nid, sw) in enumerate(iterator):
+            loss = model.train_step(feats, y_obs, nid, sw, optimizer)
             # Train metrics
             summary.update({
                 'train/loss': loss,

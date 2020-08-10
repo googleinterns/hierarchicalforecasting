@@ -11,12 +11,13 @@ from sklearn.preprocessing import OrdinalEncoder, minmax_scale
 
 flags = global_flags.FLAGS
 
-NUM_TIME_STEPS = 1941  # Starts from 1
+NUM_TIME_STEPS = 1941 - 28  # Offsetting by 28 # Starts from 1
 
 
 class M5Data:
     def __init__(self):
         self.read_data()
+        self.compute_weights()
         if flags.model == 'fixed':
             self.variation_scaling_A()
         elif flags.model == 'random':
@@ -83,14 +84,13 @@ class M5Data:
                 pickle.dump((self.tree, self.num_ts, self.ts_data, feats),
                             fout)
     
-    @property
-    def weights(self):
+    def compute_weights(self):
         levels = self.tree.levels
-        w = np.ones(self.num_ts)
+        self.w = np.ones(self.num_ts)
         for _, level in levels.items():
-            w[level] /= len(level)
-        w /= len(levels)
-        return w
+            self.w[level] /= len(level)
+        self.w /= len(levels)
+        assert(np.abs(np.sum(self.w) - 1.0) <= 1e-5)
 
     def mean_scaling(self):
         self.abs_means = np.mean(np.abs(self.ts_data), axis=0).reshape((1, -1))
@@ -107,38 +107,61 @@ class M5Data:
         self.variations = np.mean(self.variations, axis=0).reshape((1, -1))
         self.ts_data = self.ts_data / self.variations
 
-    def generator(self, train):
+    def train_gen(self):
         pred_hor = flags.pred_hor
         cont_len = flags.cont_len
-        tot_len = NUM_TIME_STEPS - 28  # Offsetting by 28
-        if train:
-            num_data = tot_len - pred_hor - 2 * cont_len
-            for i in range(num_data):
-                sub_ts = self.ts_data[i:i+cont_len+1]
-                sub_feat_cont = self.global_cont_feats[i:i+cont_len+1]
-                sub_feat_cat = tuple(
-                    feat[i:i+cont_len+1] for feat in self.global_cat_feats
-                )
-                yield (sub_feat_cont, sub_feat_cat), sub_ts  # t x *
-        else:
-            start_idx = tot_len - pred_hor - cont_len
-            sub_ts = self.ts_data[start_idx:tot_len]
-            sub_feat_cont = self.global_cont_feats[start_idx:tot_len]
+        tot_len = NUM_TIME_STEPS
+
+        num_data = tot_len - pred_hor - 2 * cont_len
+        perm = np.random.permutation(num_data)
+
+        weights = self.w * (self.num_ts / flags.batch_size)
+
+        for i in perm:
+            sub_feat_cont = self.global_cont_feats[i:i+cont_len+1]
             sub_feat_cat = tuple(
-                feat[start_idx:tot_len] for feat in self.global_cat_feats
+                feat[i:i+cont_len+1] for feat in self.global_cat_feats
             )
-            for i in range(1):
-                yield (sub_feat_cont, sub_feat_cat), sub_ts  # t x *
+            # j = np.random.choice(range(self.num_ts), size=flags.batch_size, replace=False)
+            j = np.random.choice(range(self.num_ts), size=flags.batch_size, p=self.w)
+            # j = np.random.permutation(3060)
+            sub_ts = self.ts_data[i:i+cont_len+1, j]
+            yield (sub_feat_cont, sub_feat_cat), sub_ts, j, weights[j]  # t x *
+        
+    def val_gen(self):
+        pred_hor = flags.pred_hor
+        cont_len = flags.cont_len
+        tot_len = NUM_TIME_STEPS
+        start_idx = tot_len - pred_hor - cont_len
+        sub_ts = self.ts_data[start_idx:tot_len]
+        sub_feat_cont = self.global_cont_feats[start_idx:tot_len]
+        sub_feat_cat = tuple(
+            feat[start_idx:tot_len] for feat in self.global_cat_feats
+        )
+        j = np.arange(self.num_ts)
+        yield (sub_feat_cont, sub_feat_cat), sub_ts, j  # t x *
 
     def tf_dataset(self, train):
-        # length = flags.cont_len + 1
-        dataset = tf.data.Dataset.from_generator(
-            lambda: self.generator(train),
-            (
-                (tf.float32, (tf.int32, tf.int32)),
-                tf.float32
+        if train:
+            dataset = tf.data.Dataset.from_generator(
+                self.train_gen,
+                (
+                    (tf.float32, (tf.int32, tf.int32)),  # feats
+                    tf.float32,  # y_obs
+                    tf.int32,  # id
+                    tf.float32  # s_weight
+                )
             )
-        ).shuffle(2000).prefetch(tf.data.experimental.AUTOTUNE)
+            dataset = dataset.prefetch(tf.data.experimental.AUTOTUNE)
+        else:
+            dataset = tf.data.Dataset.from_generator(
+                self.val_gen,
+                (
+                    (tf.float32, (tf.int32, tf.int32)),  # feats
+                    tf.float32,  # y_obs
+                    tf.int32,  # id
+                )
+            )
         return dataset
 
 
@@ -240,17 +263,27 @@ def main(_):
 
     print(tree.leaf_matrix)
 
-    # data = M5Data()
-    # print(data.ts_data.dtype, data.ts_data.shape)
+    data = M5Data()
+    print(data.ts_data.dtype, data.ts_data.shape)
+
+    dataset = data.tf_dataset(True)
+    for d in dataset:
+        feats = d[0]
+        y_obs = d[1]
+        nid = d[2]
+        sw = d[3]
+        print(feats[0].shape)
+        print(feats[1][0].shape, feats[1][1].shape)
+        print(y_obs.shape)
+        print(nid.shape, sw.shape)
+        break
+
+    # for d in tqdm(data.train_gen()):
+    #     pass
 
     # dataset = data.tf_dataset(True)
-    # for d in dataset:
-    #     feats = d[0]
-    #     y_obs = d[1]
-    #     print(feats[0].shape)
-    #     print(feats[1][0].shape, feats[1][1].shape)
-    #     print(y_obs.shape)
-    #     break
+    # for d in tqdm(dataset):
+    #     d[0]
 
     # print(data.weights)
     # print(np.sum(data.weights))
