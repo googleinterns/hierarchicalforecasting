@@ -12,19 +12,14 @@ MAX_FEAT_EMB_DIM = 50
 
 
 class FixedRNN(keras.Model):
-    def __init__(self, num_ts, cat_dims, leaf_matrix=None):
+    def __init__(self, num_ts, cat_dims, tree):
         super().__init__()
 
         self.num_ts = num_ts
         self.time_steps = flags.cont_len
         self.cat_dims = cat_dims
         
-        self.leaf_matrix = leaf_matrix
-        if leaf_matrix is not None:
-            num_leaves = np.sum(leaf_matrix, axis=1, keepdims=True)
-            self.leaf_matrix = leaf_matrix / num_leaves
-        # self.leaf_matrix = np.identity(3060, dtype=np.float32)
-
+        self.tree = tree
         self.node_emb = layers.Embedding(input_dim=self.num_ts,
             output_dim=flags.node_emb_dim,
             name='node_embed')
@@ -44,7 +39,10 @@ class FixedRNN(keras.Model):
         self.node_emb(np.asarray([0], dtype=np.int32))  # creates the emb matrix
         embs = self.node_emb.trainable_variables[0]
         if flags.hierarchy == 'additive':
-            embs = tf.matmul(self.leaf_matrix, embs)
+            leaf_matrix = self.tree.leaf_matrix
+            num_leaves = np.sum(leaf_matrix, axis=1, keepdims=True)
+            leaf_matrix = leaf_matrix / num_leaves
+            embs = tf.matmul(leaf_matrix, embs)
         node_emb = tf.nn.embedding_lookup(embs, nid)
         return node_emb
 
@@ -71,6 +69,27 @@ class FixedRNN(keras.Model):
 
         local_effect = tf.reduce_sum(outputs * loadings, axis=1)  # b
         return local_effect
+    
+    def regularizers(self):
+        reg = 0.0
+        if flags.hierarchy == 'laplacian':
+            print('HIERARCHY: Graph Laplacian regularization')
+            A = self.tree.adj_matrix
+            D = np.sum(A, axis=0)
+            D = np.diag(D)
+            L = D - A  # n x n
+
+            embs = self.node_emb.trainable_variables[0]  # n x e
+            embs = tf.transpose(embs)  # e x n
+            M = tf.matmul(embs, L)  # e x n
+            dot = tf.reduce_sum(M * embs)
+            reg = reg + flags.laplacian_weight * dot
+        if flags.sparsity_weight > 0.0:
+            print('SPARSITY: True')
+            embs = self.node_emb.trainable_variables[0]  # n x e
+            l1 = tf.reduce_sum(tf.abs(embs))
+            reg = reg + flags.sparsity_weight * l1
+        return reg
 
     @tf.function
     def call(self, feats, y_prev, nid):
@@ -102,6 +121,7 @@ class FixedRNN(keras.Model):
             )  # b
             # loss = tf.reduce_sum(tf.abs(pred - y_obs[-1, :]) * sw)
             loss = tf.reduce_mean(tf.abs(pred - y_obs[-1]))
+            loss += self.regularizers()
 
         grads = tape.gradient(loss, self.trainable_variables)
         optimizer.apply_gradients(zip(grads, self.trainable_variables))

@@ -217,23 +217,27 @@ class Tree:
     
     def precompute(self):
         self.init_levels()
-        self.init_leaf_matrix()
+        self.init_matrix()
     
-    def init_leaf_matrix(self):
+    def init_matrix(self):
         n = len(self.node_id)
         self.leaf_matrix = np.zeros((n, n), dtype=np.float32)
+        self.adj_matrix = np.zeros((n, n), dtype=np.float32)
 
-        self._leaf_rec(self.root, [])
+        self._dfs(self.root, [])
     
-    def _leaf_rec(self, node_str, ancestors):
+    def _dfs(self, node_str, ancestors):
         nid = self.node_id[node_str]
+        if len(ancestors):
+            par = ancestors[-1]
+            self.adj_matrix[par, nid] = 1
+            self.adj_matrix[nid, par] = 1
         ancestors = ancestors + [nid]
-
         if len(self.children[node_str]) == 0:  # leaf
             self.leaf_matrix[ancestors, nid] += 1
         else:
             for ch in self.children[node_str]:
-                self._leaf_rec(ch, ancestors)
+                self._dfs(ch, ancestors)
     
     def init_levels(self):
         self.levels = {}
@@ -262,21 +266,22 @@ def main(_):
     print(tree.id_node)
 
     print(tree.leaf_matrix)
+    print(tree.adj_matrix)
 
-    data = M5Data()
-    print(data.ts_data.dtype, data.ts_data.shape)
+    # data = M5Data()
+    # print(data.ts_data.dtype, data.ts_data.shape)
 
-    dataset = data.tf_dataset(True)
-    for d in dataset:
-        feats = d[0]
-        y_obs = d[1]
-        nid = d[2]
-        sw = d[3]
-        print(feats[0].shape)
-        print(feats[1][0].shape, feats[1][1].shape)
-        print(y_obs.shape)
-        print(nid.shape, sw.shape)
-        break
+    # dataset = data.tf_dataset(True)
+    # for d in dataset:
+    #     feats = d[0]
+    #     y_obs = d[1]
+    #     nid = d[2]
+    #     sw = d[3]
+    #     print(feats[0].shape)
+    #     print(feats[1][0].shape, feats[1][1].shape)
+    #     print(y_obs.shape)
+    #     print(nid.shape, sw.shape)
+    #     break
 
     # for d in tqdm(data.train_gen()):
     #     pass

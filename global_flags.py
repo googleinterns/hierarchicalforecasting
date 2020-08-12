@@ -21,4 +21,11 @@ flags.DEFINE_integer('var_lstm_hidden', 20,
 flags.DEFINE_integer('node_emb_dim', 20,
                     'Dimension of the node embeddings')
 
+flags.DEFINE_float('learning_rate', 0.001,
+                   'Laplacian regularization weight')
+flags.DEFINE_float('laplacian_weight', None,
+                   'Laplacian regularization weight')
+flags.DEFINE_float('sparsity_weight', 0.0,
+                   'L1 regularization weight')
+
 FLAGS = flags.FLAGS
