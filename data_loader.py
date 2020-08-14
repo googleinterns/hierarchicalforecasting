@@ -12,7 +12,7 @@ from sklearn.preprocessing import OrdinalEncoder, minmax_scale
 flags = global_flags.FLAGS
 
 NUM_TIME_STEPS = 1941 - 28  # Offsetting by 28 # Starts from 1
-
+START_IDX = 1000
 
 class M5Data:
     def __init__(self):
@@ -109,30 +109,28 @@ class M5Data:
 
     def train_gen(self):
         pred_hor = flags.pred_hor
-        cont_len = flags.cont_len
         tot_len = NUM_TIME_STEPS
 
-        num_data = tot_len - pred_hor - 2 * cont_len
+        num_data = tot_len - 3 * pred_hor
         perm = np.random.permutation(num_data)
 
         weights = self.w * (self.num_ts / flags.batch_size)
 
         for i in perm:
-            sub_feat_cont = self.global_cont_feats[i:i+cont_len+1]
+            sub_feat_cont = self.global_cont_feats[i:i+2*pred_hor]
             sub_feat_cat = tuple(
-                feat[i:i+cont_len+1] for feat in self.global_cat_feats
+                feat[i:i+2*pred_hor] for feat in self.global_cat_feats
             )
             # j = np.random.choice(range(self.num_ts), size=flags.batch_size, replace=False)
             j = np.random.choice(range(self.num_ts), size=flags.batch_size, p=self.w)
             # j = np.random.permutation(3060)
-            sub_ts = self.ts_data[i:i+cont_len+1, j]
-            yield (sub_feat_cont, sub_feat_cat), sub_ts, j, weights[j]  # t x *
+            sub_ts = self.ts_data[i:i+2*pred_hor, j]
+            yield (sub_feat_cont, sub_feat_cat), sub_ts, j  # t x *
         
     def val_gen(self):
         pred_hor = flags.pred_hor
-        cont_len = flags.cont_len
         tot_len = NUM_TIME_STEPS
-        start_idx = tot_len - pred_hor - cont_len
+        start_idx = tot_len - 2 * pred_hor
         sub_ts = self.ts_data[start_idx:tot_len]
         sub_feat_cont = self.global_cont_feats[start_idx:tot_len]
         sub_feat_cat = tuple(
@@ -149,7 +147,6 @@ class M5Data:
                     (tf.float32, (tf.int32, tf.int32)),  # feats
                     tf.float32,  # y_obs
                     tf.int32,  # id
-                    tf.float32  # s_weight
                 )
             )
             dataset = dataset.prefetch(tf.data.experimental.AUTOTUNE)

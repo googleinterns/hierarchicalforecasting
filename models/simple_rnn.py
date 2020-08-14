@@ -16,7 +16,6 @@ class FixedRNN(keras.Model):
         super().__init__()
 
         self.num_ts = num_ts
-        self.time_steps = flags.cont_len
         self.cat_dims = cat_dims
         
         self.tree = tree
@@ -30,10 +29,11 @@ class FixedRNN(keras.Model):
             for dim in self.cat_dims
         ]
 
-        self.lstm = layers.LSTM(flags.local_lstm_hidden,
-                            return_sequences=False, time_major=True)
-        
-        self.local_loading = layers.Dense(flags.local_lstm_hidden, use_bias=False)
+        self.encoder = layers.LSTM(flags.fixed_lstm_hidden,
+                            return_state=True, time_major=True)
+        self.decoder = layers.LSTM(flags.fixed_lstm_hidden,
+                            return_sequences=True, time_major=True)
+        self.local_loading = layers.Dense(flags.fixed_lstm_hidden, use_bias=False)
     
     def get_node_emb(self, nid):
         self.node_emb(np.asarray([0], dtype=np.int32))  # creates the emb matrix
@@ -56,18 +56,23 @@ class FixedRNN(keras.Model):
         all_feats = tf.concat(all_feats, axis=-1)  # t x d
         return all_feats
     
-    def get_local(self, feats, y_prev, nid):
-        y_prev = tf.expand_dims(y_prev, -1)  # t x b x 1
+    def get_fixed(self, feats, y_prev, nid):
+        y_prev = tf.expand_dims(y_prev, -1)  # t/2 x b x 1
         feats = tf.expand_dims(feats, 1)  # t x 1 x d
         feats = tf.repeat(feats, repeats=nid.shape[0], axis=1)  # t x b x d
-        local_feats = tf.concat([y_prev, feats], axis=-1)  # t x b x D'
+        feats_prev = feats[:flags.pred_hor]  # t/2 x b x d
+        feats_futr = feats[flags.pred_hor:]  # t/2 x b x d
+
+        enc_inp = tf.concat([y_prev, feats_prev], axis=-1)  # t/2 x b x D'
 
         node_emb = self.get_node_emb(nid)
         loadings = self.local_loading(node_emb)  # b x h
+        loadings = tf.expand_dims(loadings, 0)  # 1 x b x h
 
-        outputs = self.lstm(local_feats)  # b x h
+        _, h, c = self.encoder(inputs=enc_inp)  # b x h
+        outputs = self.decoder(inputs=feats_futr, initial_state=(h, c))  # t x b x h
 
-        local_effect = tf.reduce_sum(outputs * loadings, axis=1)  # b
+        local_effect = tf.reduce_sum(outputs * loadings, axis=-1)  # t x b
         return local_effect
     
     def regularizers(self):
@@ -101,13 +106,13 @@ class FixedRNN(keras.Model):
         '''
         feats = self.assemble_feats(feats)  # t x d
 
-        # Computing local effects
-        local_effect = self.get_local(feats, y_prev, nid)  # b
+        # Computing fixed effects
+        fixed_effect = self.get_fixed(feats, y_prev, nid)  # t x b
         # final_output = tf.math.softplus(final_output)  # n
-        return local_effect
+        return fixed_effect
     
     @tf.function
-    def train_step(self, feats, y_obs, nid, sw, optimizer):
+    def train_step(self, feats, y_obs, nid, optimizer):
         '''
         feats:  b x t x d, b x t
         y_obs:  b x t
@@ -115,56 +120,51 @@ class FixedRNN(keras.Model):
         sw: b
         ''' 
         with tf.GradientTape() as tape:
-            pred = self(
-                self.get_sub_feats(feats, 1),
-                y_obs[:-1, :], nid
-            )  # b
+            pred = self(feats, y_obs[:flags.pred_hor], nid)  # t x b
             # loss = tf.reduce_sum(tf.abs(pred - y_obs[-1, :]) * sw)
-            loss = tf.reduce_mean(tf.abs(pred - y_obs[-1]))
-            loss += self.regularizers()
+            rmse = tf.square(pred - y_obs[flags.pred_hor:])  # t x b
+            rmse = tf.sqrt(tf.reduce_mean(rmse, axis=0))  # b
+            rmse = tf.reduce_mean(rmse)
+            loss = rmse + self.regularizers()
 
         grads = tape.gradient(loss, self.trainable_variables)
         optimizer.apply_gradients(zip(grads, self.trainable_variables))
 
         print(self.trainable_variables)
 
-        return loss
+        return loss, rmse
     
-    def forecast(self, feats, y_prev, nid):
-        '''
-        feats: (t+p-1) x n
-        y_prev: t x n
-        '''
-        cont_len = flags.cont_len
-        pred_hor = flags.pred_hor
-        pred_path = y_prev.numpy()
+    # def forecast(self, feats, y_prev, nid):
+    #     '''
+    #     feats: (t+p-1) x n
+    #     y_prev: t x n
+    #     '''
+    #     cont_len = flags.cont_len
+    #     pred_hor = flags.pred_hor
+    #     pred_path = y_prev.numpy()
         
-        for i in range(pred_hor):
-            pred = self(
-                self.get_sub_feats(feats, i, i+cont_len),
-                pred_path[i:i+cont_len],
-                nid
-            )
-            pred = np.clip(pred.numpy(), a_min=0, a_max=None).reshape((1, -1))
-            pred_path = np.concatenate([pred_path, pred], axis=0)
+    #     for i in range(pred_hor):
+    #         pred = self(
+    #             self.get_sub_feats(feats, i, i+cont_len),
+    #             pred_path[i:i+cont_len],
+    #             nid
+    #         )
+    #         pred = np.clip(pred.numpy(), a_min=0, a_max=None).reshape((1, -1))
+    #         pred_path = np.concatenate([pred_path, pred], axis=0)
         
-        return pred_path[-pred_hor:]
+    #     return pred_path[-pred_hor:]
 
     def eval(self, dataset, level_dict):
-        cont_len = flags.cont_len
         pred_hor = flags.pred_hor
 
         for feats, y_obs, nid in dataset:
-            assert(y_obs.numpy().shape[0] == cont_len + pred_hor)
-            assert(feats[0].numpy().shape[0] == cont_len + pred_hor)
+            assert(y_obs.numpy().shape[0] == 2 * pred_hor)
+            assert(feats[0].numpy().shape[0] == 2 * pred_hor)
 
-            y_pred = self.forecast(
-                self.get_sub_feats(feats, 1),
-                y_obs[:cont_len],
-                nid
-            )
-            diff = np.square(y_pred - y_obs[-pred_hor:])
-            rmse = np.sqrt(np.mean(diff, axis=0))
+            y_pred = self(feats, y_obs[:pred_hor], nid)
+            rmse = tf.square(y_pred - y_obs[pred_hor:])  # t x b
+            rmse = tf.sqrt(tf.reduce_mean(rmse, axis=0))  # b
+            rmse = rmse.numpy()
 
             return_dict = {}
             rmses = []
@@ -178,9 +178,9 @@ class FixedRNN(keras.Model):
         np.save('notebooks/evals.npy', y_pred)
         return return_dict
 
-    @staticmethod
-    def get_sub_feats(feats, start, end=None):
-        return (
-            feats[0][start:end],
-            [feat[start:end] for feat in feats[1]],
-        )
+    # @staticmethod
+    # def get_sub_feats(feats, start, end=None):
+    #     return (
+    #         feats[0][start:end],
+    #         [feat[start:end] for feat in feats[1]],
+    #     )

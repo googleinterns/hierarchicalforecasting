@@ -76,11 +76,12 @@ def main(_):
         optimizer.learning_rate.assign(sch(step))
 
         iterator = tqdm(data.tf_dataset(train=True), mininterval=2)
-        for i, (feats, y_obs, nid, sw) in enumerate(iterator):
-            loss = model.train_step(feats, y_obs, nid, sw, optimizer)
+        for i, (feats, y_obs, nid) in enumerate(iterator):
+            loss, rmse = model.train_step(feats, y_obs, nid, optimizer)
             # Train metrics
             summary.update({
                 'train/loss': loss,
+                'train/rmse': rmse
             })
             if i % 100 == 0:
                 mean_loss = summary.metric_dict['train/loss'].result().numpy()

@@ -6,6 +6,6 @@ do
     echo "RUN ${i}"
     echo
     python train.py \
-    --expt=run_${i} --model=fixed --hierarchy=laplacian \
-    --batch_size=500 --laplacian_weight=0.001
+    --expt=te_35/run_${i} --model=fixed --hierarchy=laplacian \
+    --batch_size=500 --laplacian_weight=0.0005 --train_epochs=35
 done
