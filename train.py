@@ -49,7 +49,9 @@ def main(_):
 
     sch = keras.optimizers.schedules.PiecewiseConstantDecay(
         boundaries=boundaries, values=lr)
-    optimizer = keras.optimizers.Adam()
+    # optimizer = keras.optimizers.Adam()
+    optimizer = keras.optimizers.SGD(learning_rate=0.01, momentum=0.9,
+                                     nesterov=True)
 
     # Checkpointing
     ckpt = tf.train.Checkpoint(step=step, optimizer=optimizer,

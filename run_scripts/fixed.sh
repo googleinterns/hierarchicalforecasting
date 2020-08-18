@@ -6,6 +6,6 @@ do
     echo "RUN ${i}"
     echo
     python train.py \
-    --expt=te_35/run_${i} --model=fixed \
-    --batch_size=500 --train_epochs=35
+    --expt=trans_no_scaling_sgd/run_${i} --model=fixed \
+    --batch_size=500 --train_epochs=25 --learning_rate=0.01
 done

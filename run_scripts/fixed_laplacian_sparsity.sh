@@ -6,7 +6,7 @@ do
     echo "RUN ${i}"
     echo
     python train.py \
-    --expt=sparsity_s2s/run_${i} --model=fixed --hierarchy=laplacian \
+    --expt=sparsity_input_scaling/run_${i} --model=fixed --hierarchy=laplacian \
     --batch_size=500 --laplacian_weight=0.0001 --sparsity_weight=1e-6 \
     --train_epochs=35
 done

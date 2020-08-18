@@ -14,9 +14,9 @@ flags.DEFINE_integer('pred_hor', 28, 'Length of the prediction horizon')
 
 flags.DEFINE_integer('fixed_lstm_hidden', 16,
                     'Number of LSTM hidden units in the local model')
-flags.DEFINE_integer('var_lstm_hidden', 20,
+flags.DEFINE_integer('var_lstm_hidden', 10,
                     'Number of LSTM hidden units in the variance model')
-flags.DEFINE_integer('node_emb_dim', 20,
+flags.DEFINE_integer('node_emb_dim', 16,
                     'Dimension of the node embeddings')
 
 flags.DEFINE_float('learning_rate', 0.001,

@@ -19,11 +19,13 @@ class FixedRNN(keras.Model):
         self.cat_dims = cat_dims
         
         self.tree = tree
+        # assert(flags.node_emb_dim == flags.fixed_lstm_hidden)
         self.node_emb = layers.Embedding(input_dim=self.num_ts,
-            output_dim=flags.node_emb_dim,
-            name='node_embed')
+            output_dim=flags.node_emb_dim, name='node_embed')
+        self.input_scale = layers.Embedding(input_dim=self.num_ts,
+            output_dim=1, embeddings_initializer=keras.initializers.ones,
+            name='input_scale')
         
-
         self.embs = [
             layers.Embedding(input_dim=dim, output_dim=min(MAX_FEAT_EMB_DIM, (dim+1)//2))
             for dim in self.cat_dims
@@ -33,7 +35,10 @@ class FixedRNN(keras.Model):
                             return_state=True, time_major=True)
         self.decoder = layers.LSTM(flags.fixed_lstm_hidden,
                             return_sequences=True, time_major=True)
-        self.local_loading = layers.Dense(flags.fixed_lstm_hidden, use_bias=False)
+        self.output_trans = layers.Dense(flags.node_emb_dim, use_bias=False)
+        self.output_scale = layers.Embedding(input_dim=self.num_ts,
+            output_dim=1, embeddings_initializer=keras.initializers.ones,
+            name='output_scale')
     
     def get_node_emb(self, nid):
         self.node_emb(np.asarray([0], dtype=np.int32))  # creates the emb matrix
@@ -43,6 +48,10 @@ class FixedRNN(keras.Model):
             num_leaves = np.sum(leaf_matrix, axis=1, keepdims=True)
             leaf_matrix = leaf_matrix / num_leaves
             embs = tf.matmul(leaf_matrix, embs)
+        elif flags.hierarchy == 'add_dev':
+            print('\n\tHIERARCHY: Additive deviations')
+            ancestor_matrix = self.tree.ancestor_matrix
+            embs = tf.matmul(ancestor_matrix, embs)
         node_emb = tf.nn.embedding_lookup(embs, nid)
         return node_emb
 
@@ -57,7 +66,15 @@ class FixedRNN(keras.Model):
         return all_feats
     
     def get_fixed(self, feats, y_prev, nid):
+        input_scale = self.input_scale(nid)  # b x 1
+        input_scale = tf.expand_dims(input_scale, 0)  # 1 x b x 1
+
+        output_scale = self.output_scale(nid)  # b x 1
+        output_scale = tf.expand_dims(output_scale, 0)  # 1 x b x 1
+
         y_prev = tf.expand_dims(y_prev, -1)  # t/2 x b x 1
+        # y_prev = y_prev * input_scale  # t/2 x b x 1
+
         feats = tf.expand_dims(feats, 1)  # t x 1 x d
         feats = tf.repeat(feats, repeats=nid.shape[0], axis=1)  # t x b x d
         feats_prev = feats[:flags.pred_hor]  # t/2 x b x d
@@ -65,12 +82,13 @@ class FixedRNN(keras.Model):
 
         enc_inp = tf.concat([y_prev, feats_prev], axis=-1)  # t/2 x b x D'
 
-        node_emb = self.get_node_emb(nid)
-        loadings = self.local_loading(node_emb)  # b x h
+        loadings = self.get_node_emb(nid)  # b x h
         loadings = tf.expand_dims(loadings, 0)  # 1 x b x h
+        # loadings = loadings * output_scale
 
         _, h, c = self.encoder(inputs=enc_inp)  # b x h
         outputs = self.decoder(inputs=feats_futr, initial_state=(h, c))  # t x b x h
+        outputs = self.output_trans(outputs)  # t x b x h
 
         local_effect = tf.reduce_sum(outputs * loadings, axis=-1)  # t x b
         return local_effect
@@ -90,9 +108,9 @@ class FixedRNN(keras.Model):
             dot = tf.reduce_sum(M * embs)
             reg = reg + flags.laplacian_weight * dot
         if flags.sparsity_weight > 0.0:
-            print('SPARSITY: True')
+            print('\nSPARSITY: True')
             embs = self.node_emb.trainable_variables[0]  # n x e
-            l1 = tf.reduce_sum(tf.abs(embs))
+            l1 = tf.reduce_mean(tf.square(embs))   ############ l2 norm
             reg = reg + flags.sparsity_weight * l1
         return reg
 
@@ -133,26 +151,6 @@ class FixedRNN(keras.Model):
         print(self.trainable_variables)
 
         return loss, rmse
-    
-    # def forecast(self, feats, y_prev, nid):
-    #     '''
-    #     feats: (t+p-1) x n
-    #     y_prev: t x n
-    #     '''
-    #     cont_len = flags.cont_len
-    #     pred_hor = flags.pred_hor
-    #     pred_path = y_prev.numpy()
-        
-    #     for i in range(pred_hor):
-    #         pred = self(
-    #             self.get_sub_feats(feats, i, i+cont_len),
-    #             pred_path[i:i+cont_len],
-    #             nid
-    #         )
-    #         pred = np.clip(pred.numpy(), a_min=0, a_max=None).reshape((1, -1))
-    #         pred_path = np.concatenate([pred_path, pred], axis=0)
-        
-    #     return pred_path[-pred_hor:]
 
     def eval(self, dataset, level_dict):
         pred_hor = flags.pred_hor
@@ -177,10 +175,3 @@ class FixedRNN(keras.Model):
 
         np.save('notebooks/evals.npy', y_pred)
         return return_dict
-
-    # @staticmethod
-    # def get_sub_feats(feats, start, end=None):
-    #     return (
-    #         feats[0][start:end],
-    #         [feat[start:end] for feat in feats[1]],
-    #     )
