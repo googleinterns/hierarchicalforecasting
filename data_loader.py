@@ -221,6 +221,7 @@ class Tree:
         self.leaf_matrix = np.zeros((n, n), dtype=np.float32)
         self.ancestor_matrix = np.zeros((n, n), dtype=np.float32)
         self.adj_matrix = np.zeros((n, n), dtype=np.float32)
+        self.parent_matrix = np.zeros((n, n), dtype=np.float32)
 
         self._dfs(self.root, [])
     
@@ -230,6 +231,7 @@ class Tree:
             par = ancestors[-1]
             self.adj_matrix[par, nid] = 1
             self.adj_matrix[nid, par] = 1
+            self.parent_matrix[nid, par] = 1
         ancestors = ancestors + [nid]
         self.ancestor_matrix[nid, ancestors] = 1
         if len(self.children[node_str]) == 0:  # leaf
