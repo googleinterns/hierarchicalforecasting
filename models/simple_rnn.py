@@ -41,7 +41,9 @@ class FixedRNN(keras.Model):
         self.decoder = layers.LSTM(flags.fixed_lstm_hidden,
                             return_sequences=True, time_major=True)
         
-        if flags.overparam:
+        if flags.emb_as_inp:
+            self.output_trans = layers.Dense(1, use_bias=False)
+        elif flags.overparam:
             self.output_trans = layers.Dense(flags.node_emb_dim, use_bias=False)
         
         if flags.output_scaling:
@@ -84,33 +86,39 @@ class FixedRNN(keras.Model):
     
     def get_fixed(self, feats, y_prev, nid):
         y_prev = tf.expand_dims(y_prev, -1)  # t/2 x b x 1
-        if flags.input_scaling:
-            input_scale = self.input_scale(nid)  # b x 1
-            input_scale = tf.expand_dims(input_scale, 0)  # 1 x b x 1
-            y_prev = y_prev * input_scale  # t/2 x b x 1
+        
+        node_emb = self.get_node_emb(nid)  # b x h
 
         feats = tf.expand_dims(feats, 1)  # t x 1 x d
         feats = tf.repeat(feats, repeats=nid.shape[0], axis=1)  # t x b x d
+
+        if flags.emb_as_inp:
+            node_id_feat = tf.expand_dims(node_emb, 0)  # 1 x b x h
+            node_id_feat = tf.repeat(node_id_feat, repeats=2*flags.pred_hor, axis=0)
+                                        # t x b x h
+            feats = tf.concat([node_id_feat, feats], axis=-1)  # t x b x d
+
         feats_prev = feats[:flags.pred_hor]  # t/2 x b x d
         feats_futr = feats[flags.pred_hor:]  # t/2 x b x d
 
         enc_inp = tf.concat([y_prev, feats_prev], axis=-1)  # t/2 x b x D'
 
-        loadings = self.get_node_emb(nid)  # b x h
-        loadings = tf.expand_dims(loadings, 0)  # 1 x b x h
+        _, h, c = self.encoder(inputs=enc_inp)  # b x h
+        outputs = self.decoder(inputs=feats_futr, initial_state=(h, c))  # t x b x h
+
+        if flags.emb_as_inp or flags.overparam:
+            outputs = self.output_trans(outputs)  # t x b x h
         
         if flags.output_scaling:
             output_scale = self.output_scale(nid)  # b x 1
             output_scale = tf.expand_dims(output_scale, 0)  # 1 x b x 1
-            loadings = loadings * output_scale
+            outputs = outputs * output_scale
 
-        _, h, c = self.encoder(inputs=enc_inp)  # b x h
-        outputs = self.decoder(inputs=feats_futr, initial_state=(h, c))  # t x b x h
-
-        if flags.overparam:
-            outputs = self.output_trans(outputs)  # t x b x h
-
-        fixed_effect = tf.reduce_sum(outputs * loadings, axis=-1)  # t x b
+        if flags.emb_as_inp:
+            fixed_effect = tf.squeeze(outputs, axis=-1)
+        else:
+            loadings = tf.expand_dims(node_emb, 0)  # 1 x b x h
+            fixed_effect = tf.reduce_sum(outputs * loadings, axis=-1)  # t x b
         return fixed_effect
     
     def regularizers(self):
@@ -126,6 +134,7 @@ class FixedRNN(keras.Model):
         #     M = tf.matmul(embs, L)  # e x n
         #     dot = tf.reduce_sum(M * embs)
         #     reg = reg + flags.laplacian_weight * dot
+        reg = 0.0
         if flags.l2_reg_weight > 0.0:
             print('\nL2 reg: True')
             embs = self.node_emb.trainable_variables[0]  # n x e
@@ -137,6 +146,19 @@ class FixedRNN(keras.Model):
             l2 = tf.reduce_mean(tf.square(slack_embs))
             reg = flags.l2_weight_slack * l2
         return reg
+    
+    def apply_l1_reg(self, lr):
+        embs = self.node_emb.trainable_variables[0]
+        if flags.l1_reg_weight > 0:
+            updated_embs = tf.math.maximum(
+                tf.math.abs(embs) - flags.l1_reg_weight * lr, 0)
+            updated_embs *= tf.math.sign(embs)
+            updated_embs /= (1 + flags.l2_reg_weight * lr)
+            embs.assign(updated_embs)
+        # elif flags.l2_reg_weight > 0:
+        #     updated_embs = embs / (1 + flags.l2_reg_weight * lr)
+        #     embs.assign(updated_embs)
+        
 
     @tf.function
     def call(self, feats, y_prev, nid):
@@ -166,11 +188,12 @@ class FixedRNN(keras.Model):
             # loss = tf.reduce_sum(tf.abs(pred - y_obs[-1, :]) * sw)
             rmse = tf.square(pred - y_obs[flags.pred_hor:])  # t x b
             rmse = tf.sqrt(tf.reduce_mean(rmse, axis=0))  # b
-            rmse = tf.reduce_mean(rmse)
-            loss = rmse + self.regularizers()
+            loss = tf.reduce_mean(rmse)
 
         grads = tape.gradient(loss, self.trainable_variables)
         optimizer.apply_gradients(zip(grads, self.trainable_variables))
+
+        self.apply_l1_l2_reg(optimizer.learning_rate)
 
         print(self.trainable_variables)
 
