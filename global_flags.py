@@ -18,6 +18,8 @@ flags.DEFINE_integer('var_lstm_hidden', 10,
                     'Number of LSTM hidden units in the variance model')
 flags.DEFINE_integer('node_emb_dim', 16,
                     'Dimension of the node embeddings')
+flags.DEFINE_integer('random_seed', None,
+                    'The random seed to be used for TF and numpy')
 
 flags.DEFINE_float('learning_rate', 0.001,
                    'Learning rate')
@@ -25,17 +27,12 @@ flags.DEFINE_float('learning_rate', 0.001,
 #                    'Laplacian regularization weight')
 flags.DEFINE_float('l2_reg_weight', 0.0,
                    'L2 regularization weight')
-flags.DEFINE_float('l1_reg_weight', 0.0,
-                   'L1 regularization weight')
 flags.DEFINE_float('l2_weight_slack', 0.0,
                    'L2 regularization weight')
 
 flags.DEFINE_boolean('overparam', False, 'Over parameterization')
-flags.DEFINE_boolean('input_scaling', False,
-                     'Learning input scale parameters')
 flags.DEFINE_boolean('output_scaling', False,
                      'Learning output scale parameters')
 flags.DEFINE_boolean('emb_as_inp', False,
                      'Whether to provide node embeddings as input')
-
 FLAGS = flags.FLAGS

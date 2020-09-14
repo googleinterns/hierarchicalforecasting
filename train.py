@@ -14,6 +14,9 @@ from tqdm import tqdm
 flags = global_flags.FLAGS
 
 def main(_):
+    tf.random.set_seed(flags.random_seed)
+    np.random.seed(flags.random_seed)
+    
     # Load data
     if flags.dataset == 'm5':
         data = data_loader.M5Data()
