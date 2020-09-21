@@ -2,6 +2,8 @@ import pickle
 import numpy as np
 import sys
 import os
+import bootstrapped.bootstrap as bs
+import bootstrapped.stats_functions as bs_stats
 
 
 def main():
@@ -21,7 +23,9 @@ def main():
             agg[key].append(eval_dict[key])
     
     for key in agg:
-        print(key, f'{np.mean(agg[key]):.4f} +- {np.std(agg[key]):.4f}')
+        bsr = bs.bootstrap(np.asarray(agg[key]), stat_func=bs_stats.mean, alpha=0.05)  # 95% confidence interval
+        print(key, f'Mean: {np.mean(agg[key]):.4f}\tStd: {np.std(agg[key]):.4f}'
+                   f'\tBootstrap CI: ({bsr.lower_bound:.4f}, {bsr.upper_bound:.4f})')
 
 if __name__ == "__main__":
     main()

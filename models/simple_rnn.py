@@ -112,13 +112,13 @@ class FixedRNN(keras.Model):
         _, h, c = self.encoder(inputs=enc_inp)  # b x h
         outputs = self.decoder(inputs=feats_futr, initial_state=(h, c))  # t x b x h
 
-        if flags.overparam:
+        if flags.emb_as_inp or flags.overparam:
             outputs = self.output_trans(outputs)  # t x b x h
 
         fixed_effect = tf.reduce_sum(outputs * loadings, axis=-1)  # t x b
         return fixed_effect
     
-    def regularizers(self):
+    def regularizers(self, nid):
         reg = 0.0
         if flags.l2_reg_weight > 0.0:
             print('\nL2 reg: True')
@@ -130,6 +130,11 @@ class FixedRNN(keras.Model):
             slack_embs = self.slack_emb.trainable_variables[0]
             l2 = tf.reduce_mean(tf.square(slack_embs))
             reg = reg + flags.l2_weight_slack * l2
+        if flags.l1_reg_weight > 0.0:
+            node_emb = self.get_node_emb(np.arange(self.num_ts))
+            l1 = tf.reduce_mean(tf.abs(node_emb), axis=1)
+            l1 = tf.reduce_mean(self.tree.leaf_vector * l1)
+            reg = reg + flags.l1_reg_weight * l1
         return reg
 
     @tf.function
@@ -160,7 +165,7 @@ class FixedRNN(keras.Model):
             rmse = tf.square(pred - y_obs[flags.pred_hor:])  # t x b
             rmse = tf.sqrt(tf.reduce_mean(rmse, axis=0))  # b
             rmse = tf.reduce_mean(rmse)
-            loss = rmse + self.regularizers()
+            loss = rmse + self.regularizers(nid)
 
         grads = tape.gradient(loss, self.trainable_variables)
         optimizer.apply_gradients(zip(grads, self.trainable_variables))

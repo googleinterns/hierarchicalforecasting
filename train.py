@@ -1,4 +1,5 @@
 import os
+import sys
 import tensorflow as tf
 import numpy as np
 import pickle
@@ -17,6 +18,10 @@ def main(_):
     tf.random.set_seed(flags.random_seed)
     np.random.seed(flags.random_seed)
     
+    print('FLAGS:')
+    for flag in flags.flags_by_module_dict()['global_flags']:
+        print(f'\t--{flag.name}={flag._value}')
+
     # Load data
     if flags.dataset == 'm5':
         data = data_loader.M5Data()
@@ -78,6 +83,7 @@ def main(_):
     while step.numpy() < flags.train_epochs:
         ep = step.numpy()
         print(f'Epoch {ep}')
+        sys.stdout.flush()
         optimizer.learning_rate.assign(sch(step))
 
         iterator = tqdm(data.tf_dataset(train=True), mininterval=2)

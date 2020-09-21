@@ -23,12 +23,12 @@ flags.DEFINE_integer('random_seed', None,
 
 flags.DEFINE_float('learning_rate', 0.001,
                    'Learning rate')
-# flags.DEFINE_float('laplacian_weight', None,
-#                    'Laplacian regularization weight')
 flags.DEFINE_float('l2_reg_weight', 0.0,
                    'L2 regularization weight')
 flags.DEFINE_float('l2_weight_slack', 0.0,
                    'L2 regularization weight')
+flags.DEFINE_float('l1_reg_weight', 0.0,
+                   'L1 regularization weight')
 
 flags.DEFINE_boolean('overparam', False, 'Over parameterization')
 flags.DEFINE_boolean('output_scaling', False,
