@@ -8,12 +8,14 @@ import json
 
 def main():
     for it in range(100):
-        batch_size = int(2 ** np.random.uniform(8, 11))
+        batch_size = int(2 ** np.random.uniform(6, 9))
         l2 = 10 ** np.random.uniform(-4, 1)
         l2_slack = 10 ** np.random.uniform(-4, 1)
         node_emb = np.random.randint(4, 25)
-        ep = np.random.randint(20, 30)
-        lr = 10 ** np.random.uniform(-3, -1)
+        ep = np.random.randint(15, 30)
+        lr = 0.01
+        lstm_hidden = int(2 ** np.random.uniform(1, 5))
+        l1 = 10 ** np.random.uniform(-4, 1)
 
         hparams = {
             "batch_size": batch_size,
@@ -21,7 +23,9 @@ def main():
             "l2_slack": l2_slack,
             "node_emb": node_emb,
             "ep": ep,
-            "lr": lr
+            "lr": lr,
+            "lstm_hidden": lstm_hidden,
+            "l1": l1
         }
         print(f'HPARAMS run {it}:', hparams)
 
@@ -31,7 +35,8 @@ def main():
             cmd = ["python", "train.py", f"--expt=hpo/run_{i}",
                 f"--random_seed={i}", "--model=fixed", "--hierarchy=sibling_reg",
                 f"--batch_size={batch_size}", f"--l2_reg_weight={l2}",
-                f"--l2_weight_slack={l2_slack}", f"--node_emb_dim={node_emb}",
+                f"--l2_weight_slack={l2_slack}", f"--l1_reg_weight={l1}",
+                f"--node_emb_dim={node_emb}", f"--fixed_lstm_hidden={lstm_hidden}",
                 "--overparam=True", "--output_scaling=True", f"--train_epochs={ep}",
                 f"--learning_rate={lr}"]
             with open('logs/hpo.log', 'w') as fout:

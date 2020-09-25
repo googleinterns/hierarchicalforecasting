@@ -6,8 +6,8 @@ do
     echo "RUN ${i}"
     echo
     python train.py \
-    --expt=rerun_3/run_${i} --random_seed=${i} --model=fixed --hierarchy=sibling_reg \
-    --batch_size=500 --l2_reg_weight=0.0 --l2_weight_slack=0.0 --node_emb_dim=16 \
-    --overparam=True --output_scaling=True \
-    --train_epochs=25 --learning_rate=0.01
+    --expt=opt_hps/run_${i} --random_seed=${i} --model=fixed --hierarchy=sibling_reg \
+    --batch_size=350 --l2_reg_weight=0.6 --l2_weight_slack=0.1 --l1_reg_weight=0.002 \
+    --node_emb_dim=18 --fixed_lstm_hidden=15 --overparam=True --output_scaling=True \
+    --train_epochs=20 --learning_rate=0.01
 done
