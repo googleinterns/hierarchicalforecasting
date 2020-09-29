@@ -1,11 +1,13 @@
 set -e
 
-for i in {1..10}
+for i in {1..20}
 do
     echo
     echo "RUN ${i}"
     echo
     python train.py \
-    --expt=trans_no_scaling_sgd/run_${i} --model=fixed \
-    --batch_size=500 --train_epochs=25 --learning_rate=0.01
+    --expt=run_${i} --random_seed=${i} --model=fixed \
+    --batch_size=500 --node_emb_dim=16 --lstm_hidden_dim=64 \
+    --overparam=True --output_scaling=False \
+    --train_epochs=30 --learning_rate=0.01
 done

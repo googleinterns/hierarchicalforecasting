@@ -1,9 +1,9 @@
 from absl import flags
 
 flags.DEFINE_string('expt', None, 'The name of the experiment dir')
-flags.DEFINE_string('dataset', 'm5', 'The name of the experiment dir')
+flags.DEFINE_string('dataset', 'fav', 'The name of the experiment dir')
 flags.DEFINE_string('model', 'fixed', 'The name of the experiment dir')
-flags.DEFINE_string('m5dir', './data/m5', 'Path to the m5 data directory')
+flags.DEFINE_string('favorita_dir', './data/favorita', 'Path to the m5 data directory')
 flags.DEFINE_string('hierarchy', None, 'Type of hierarchy information to use')
 
 flags.DEFINE_integer('train_epochs', 25, 'Number of epochs to train')

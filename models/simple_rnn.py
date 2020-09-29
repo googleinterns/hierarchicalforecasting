@@ -78,7 +78,8 @@ class FixedRNN(keras.Model):
         all_feats = tf.concat(all_feats, axis=-1)  # t x d
         return all_feats
     
-    def get_fixed(self, feats, y_prev, nid):
+    def get_fixed(self, feats, y_prev, nid, scale):
+        y_prev /= scale
         y_prev = tf.expand_dims(y_prev, -1)  # t/2 x b x 1
 
         node_emb = self.get_node_emb(nid)  # b x h
@@ -116,6 +117,7 @@ class FixedRNN(keras.Model):
             outputs = self.output_trans(outputs)  # t x b x h
 
         fixed_effect = tf.reduce_sum(outputs * loadings, axis=-1)  # t x b
+        fixed_effect *= scale
         return fixed_effect
     
     def regularizers(self, nid):
@@ -138,7 +140,7 @@ class FixedRNN(keras.Model):
         return reg
 
     @tf.function
-    def call(self, feats, y_prev, nid):
+    def call(self, feats, y_prev, nid, scale):
         '''
         feats: t x d, t
         y_prev: t x b
@@ -148,12 +150,12 @@ class FixedRNN(keras.Model):
         feats = self.assemble_feats(feats)  # t x d
 
         # Computing fixed effects
-        fixed_effect = self.get_fixed(feats, y_prev, nid)  # t x b
+        fixed_effect = self.get_fixed(feats, y_prev, nid, scale)  # t x b
         # final_output = tf.math.softplus(final_output)  # n
         return fixed_effect
     
     @tf.function
-    def train_step(self, feats, y_obs, nid, optimizer):
+    def train_step(self, feats, y_obs, nid, scale, optimizer):
         '''
         feats:  b x t x d, b x t
         y_obs:  b x t
@@ -161,39 +163,39 @@ class FixedRNN(keras.Model):
         sw: b
         ''' 
         with tf.GradientTape() as tape:
-            pred = self(feats, y_obs[:flags.pred_hor], nid)  # t x b
-            rmse = tf.square(pred - y_obs[flags.pred_hor:])  # t x b
-            rmse = tf.sqrt(tf.reduce_mean(rmse, axis=0))  # b
-            rmse = tf.reduce_mean(rmse)
-            loss = rmse + self.regularizers(nid)
+            pred = self(feats, y_obs[:flags.pred_hor], nid, scale)  # t x b
+            lrmse = tf.square(tf.math.log(pred) - tf.math.log(y_obs[flags.pred_hor:]))  # t x b
+            lrmse = tf.sqrt(tf.reduce_mean(lrmse, axis=0))  # b
+            lrmse = tf.reduce_mean(lrmse)
+            loss = lrmse + self.regularizers(nid)
 
         grads = tape.gradient(loss, self.trainable_variables)
         optimizer.apply_gradients(zip(grads, self.trainable_variables))
 
         print(self.trainable_variables)
 
-        return loss, rmse
+        return loss, lrmse
 
     def eval(self, dataset, level_dict):
         pred_hor = flags.pred_hor
 
-        for feats, y_obs, nid in dataset:
+        for feats, y_obs, nid, scale in dataset:
             assert(y_obs.numpy().shape[0] == 2 * pred_hor)
             assert(feats[0].numpy().shape[0] == 2 * pred_hor)
 
-            y_pred = self(feats, y_obs[:pred_hor], nid)
-            rmse = tf.square(y_pred - y_obs[pred_hor:])  # t x b
-            rmse = tf.sqrt(tf.reduce_mean(rmse, axis=0))  # b
-            rmse = rmse.numpy()
+            y_pred = self(feats, y_obs[:pred_hor], nid, scale)
+            lrmse = tf.square(tf.math.log(y_pred) - tf.math.log(y_obs[pred_hor:]))  # t x b
+            lrmse = tf.sqrt(tf.reduce_mean(lrmse, axis=0))  # b
+            lrmse = lrmse.numpy()
 
             return_dict = {}
             rmses = []
             for d in level_dict:
-                sub_mean = np.mean(rmse[level_dict[d]])
+                sub_mean = np.mean(lrmse[level_dict[d]])
                 rmses.append(sub_mean)
                 return_dict[f'test/rmse@{d}'] = sub_mean
 
             return_dict['test/rmse'] = np.mean(rmses)
 
-        np.save('notebooks/evals.npy', y_pred)
+        # np.save('notebooks/evals.npy', y_pred)
         return return_dict

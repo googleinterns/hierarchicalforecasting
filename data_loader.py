@@ -4,31 +4,35 @@ import os
 import pickle
 import tensorflow as tf
 import global_flags
+import datetime as dt
 
 from absl import app
 from tqdm import tqdm
 from sklearn.preprocessing import OrdinalEncoder, minmax_scale
+from datetime import datetime
 
 flags = global_flags.FLAGS
 
-NUM_TIME_STEPS = 1941 - 28  # Offsetting by 28 # Starts from 1
-START_IDX = 1000
+START = "2016-06-29"
+END = "2017-08-15"
 
-class M5Data:
+FORMAT = "%Y-%m-%d"
+START = datetime.strptime(START, FORMAT)
+END = datetime.strptime(END, FORMAT)
+DIFF = END-START
+
+NUM_TIME_STEPS = DIFF.days + 1
+
+class Favorita:
     def __init__(self):
         self.read_data()
         self.compute_weights()
-        if flags.model == 'fixed':
-            self.variation_scaling_A()
-        elif flags.model == 'random':
-            self.variation_scaling_B()
-        else:
-            raise ValueError(f'Unknown model {flags.model}')
+        self.scale = np.sum(self.tree.leaf_matrix, axis=1)
 
     def read_data(self):
-        data_path = os.path.join(flags.m5dir, 'sales_train_evaluation.csv')
-        feats_path = os.path.join(flags.m5dir, 'calendar.csv')
-        pkl_path = os.path.join(flags.m5dir, 'data.pkl')
+        data_path = os.path.join(flags.favorita_dir, 'aggregate_sales10.csv')
+        feats_path = os.path.join(flags.favorita_dir, 'holidays_events.csv')
+        pkl_path = os.path.join(flags.favorita_dir, 'data.pkl')
 
         try:
             with open(pkl_path, 'rb') as fin:
@@ -38,41 +42,76 @@ class M5Data:
                         = pickle.load(fin)
         except FileNotFoundError:
             print('Pickle not found. Reading from csv ...')
-            df = pd.read_csv(data_path, ',')
+            df = pd.read_csv(data_path, sep=',')
+            df['date'] = pd.to_datetime(df.date)
+            df.sort_values(by='date', inplace=True)
+
             self.tree = Tree()
 
-            col_name = 'item_id' # 'dept_id'
-            for item_id in df[col_name]:
-                self.tree.insert_seq(item_id)
+            for item in df['item']:
+                item_id = item // 100
+                store_id = item % 100
+
+                if store_id == 0:
+                    continue
+                node_str = f'{item_id}_{store_id}'
+                self.tree.insert_seq(node_str)
             self.tree.precompute()
             
             self.num_ts = self.tree.num_nodes
+            print('NUM TS', self.num_ts)
             self.ts_data = np.zeros((self.num_ts, NUM_TIME_STEPS), dtype=np.float32)
+            print(self.ts_data.shape)
 
-            cols = df.columns
-            node_str_idx = cols.get_loc(col_name) + 1
-            d_1_idx = cols.get_loc('d_1') + 1
-            d_n_idx = cols.get_loc(f'd_{NUM_TIME_STEPS}') + 1
-            for row in tqdm(df.itertuples()):
-                node_str = row[node_str_idx]
+            for row in tqdm(df[['item', 'date', 'unit_sales']].itertuples()):
+                item, date, sales = row[1], row[2], row[3]
+                if (item % 100) == 0:
+                    continue
+                node_str = f'{item // 100}_{item % 100}'
+                idx = (date - START).days
                 a_ids = self.tree.get_ancestor_ids(node_str)
-                ts = np.asarray(row[d_1_idx : d_n_idx+1])
-                self.ts_data[a_ids] += ts
+                self.ts_data[a_ids, idx] += sales
+
+            # cols = df.columns
+            # node_str_idx = cols.get_loc(col_name) + 1
+            # d_1_idx = cols.get_loc('d_1') + 1
+            # d_n_idx = cols.get_loc(f'd_{NUM_TIME_STEPS}') + 1
+            # for row in tqdm(df.itertuples()):
+            #     node_str = row[node_str_idx]
+            #     a_ids = self.tree.get_ancestor_ids(node_str)
+            #     ts = np.asarray(row[d_1_idx : d_n_idx+1])
+            #     self.ts_data[a_ids] += ts
             self.ts_data = self.ts_data.T
+            print('TS DATA', self.ts_data.shape)
             
-            features = pd.read_csv(feats_path, ',')
-            feats = np.asarray(
-                features[['wday', 'month', 'snap_CA', 'snap_TX', 'snap_WI']]\
-                    [:NUM_TIME_STEPS])
-            feats = minmax_scale(feats)
-            self.global_cont_feats = np.asarray(feats, dtype=np.float32)
+            date_feats = []
+            for i in range(NUM_TIME_STEPS):
+                date = START + dt.timedelta(days=i)
+                date_feats.append(date.isocalendar()[1:3])
+            date_feats = minmax_scale(date_feats)
+            self.global_cont_feats = np.asarray(date_feats, dtype=np.float32)
+            print('CONT FEATS', self.global_cont_feats.shape)
+
+            features = pd.read_csv(feats_path, sep=',')
+            features['date'] = pd.to_datetime(features.date)
+            features.sort_values(by='date', inplace=True)
 
             self.global_cat_feats = []
             self.global_cat_dims = []
 
-            cat_feat_list = ['event_name_1', 'event_type_1']
+            cat_feat_list = ['type', 'locale', 'locale_name']
             for cat_feat_name in cat_feat_list:
-                feats = features[cat_feat_name][:NUM_TIME_STEPS].fillna('')
+                feats = ['' for i in range(NUM_TIME_STEPS)]
+                for row in features[['date', cat_feat_name]].itertuples():
+                    date = row[1]
+                    idx = (date - START).days
+                    to_end = (END - date).days
+                    # print(date, START, idx, to_end)
+                    if idx < 0 or to_end < 0:
+                        continue
+                    event = row[2]
+                    feats[idx] = event
+
                 feats = [[feat] for feat in feats]
                 enc = OrdinalEncoder(dtype=np.int32)
                 feats = enc.fit_transform(feats)
@@ -92,21 +131,6 @@ class M5Data:
         self.w /= len(levels)
         assert(np.abs(np.sum(self.w) - 1.0) <= 1e-5)
 
-    def mean_scaling(self):
-        self.abs_means = np.mean(np.abs(self.ts_data), axis=0).reshape((1, -1))
-        self.ts_data = self.ts_data / self.abs_means
-    
-    def variation_scaling_A(self):
-        self.variations = self.ts_data[1:] - self.ts_data[:-1]
-        self.variations = np.mean(self.variations**2, axis=0)
-        self.variations = np.sqrt(self.variations).reshape((1, -1))
-        self.ts_data = self.ts_data / self.variations
-    
-    def variation_scaling_B(self):
-        self.variations = np.abs(self.ts_data[1:] - self.ts_data[:-1])
-        self.variations = np.mean(self.variations, axis=0).reshape((1, -1))
-        self.ts_data = self.ts_data / self.variations
-
     def train_gen(self):
         pred_hor = flags.pred_hor
         tot_len = NUM_TIME_STEPS
@@ -125,7 +149,8 @@ class M5Data:
             j = np.random.choice(range(self.num_ts), size=flags.batch_size, p=self.w)
             # j = np.random.permutation(3060)
             sub_ts = self.ts_data[i:i+2*pred_hor, j]
-            yield (sub_feat_cont, sub_feat_cat), sub_ts, j  # t x *
+            sub_scale = self.scale[j]
+            yield (sub_feat_cont, sub_feat_cat), sub_ts, j, sub_scale  # t x *
         
     def val_gen(self):
         pred_hor = flags.pred_hor
@@ -137,7 +162,8 @@ class M5Data:
             feat[start_idx:tot_len] for feat in self.global_cat_feats
         )
         j = np.arange(self.num_ts)
-        yield (sub_feat_cont, sub_feat_cat), sub_ts, j  # t x *
+        sub_scale = self.scale
+        yield (sub_feat_cont, sub_feat_cat), sub_ts, j, sub_scale  # t x *
 
     def tf_dataset(self, train):
         if train:
@@ -255,25 +281,25 @@ class Tree:
 
 
 def main(_):
-    tree = Tree()
-    tree.insert_seq('food_2_1')
-    tree.insert_seq('food_2_2')
-    tree.insert_seq('hobbies_1')
-    tree.insert_seq('hobbies_2')
+    # tree = Tree()
+    # tree.insert_seq('food_2_1')
+    # tree.insert_seq('food_2_2')
+    # tree.insert_seq('hobbies_1')
+    # tree.insert_seq('hobbies_2')
 
-    tree.precompute()
+    # tree.precompute()
 
-    print(tree.parent)
-    print(tree.children)
-    print(tree.node_id)
-    print(tree.id_node)
+    # print(tree.parent)
+    # print(tree.children)
+    # print(tree.node_id)
+    # print(tree.id_node)
 
-    print(tree.leaf_matrix)
-    print(tree.adj_matrix)
-    print(tree.ancestor_matrix)
+    # print(tree.leaf_matrix)
+    # print(tree.adj_matrix)
+    # print(tree.ancestor_matrix)
 
-    # data = M5Data()
-    # print(data.ts_data.dtype, data.ts_data.shape)
+    data = Favorita()
+    print(data.ts_data.dtype, data.ts_data.shape)
 
     # dataset = data.tf_dataset(True)
     # for d in dataset:
