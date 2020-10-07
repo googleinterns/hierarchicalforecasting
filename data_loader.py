@@ -27,7 +27,8 @@ class Favorita:
     def __init__(self):
         self.read_data()
         self.compute_weights()
-        self.scale = np.sum(self.tree.leaf_matrix, axis=1)
+        self.scale = np.sum(np.abs(self.ts_data), axis=0)
+        self.ts_data /= self.scale
 
     def read_data(self):
         data_path = os.path.join(flags.favorita_dir, 'aggregate_sales10.csv')
@@ -147,7 +148,6 @@ class Favorita:
             )
             # j = np.random.choice(range(self.num_ts), size=flags.batch_size, replace=False)
             j = np.random.choice(range(self.num_ts), size=flags.batch_size, p=self.w)
-            # j = np.random.permutation(3060)
             sub_ts = self.ts_data[i:i+2*pred_hor, j]
             sub_scale = self.scale[j]
             yield (sub_feat_cont, sub_feat_cat), sub_ts, j, sub_scale  # t x *
@@ -170,9 +170,10 @@ class Favorita:
             dataset = tf.data.Dataset.from_generator(
                 self.train_gen,
                 (
-                    (tf.float32, (tf.int32, tf.int32)),  # feats
+                    (tf.float32, (tf.int32, tf.int32, tf.int32)),  # feats
                     tf.float32,  # y_obs
                     tf.int32,  # id
+                    tf.float32,  # scale
                 )
             )
             dataset = dataset.prefetch(tf.data.experimental.AUTOTUNE)
@@ -180,9 +181,10 @@ class Favorita:
             dataset = tf.data.Dataset.from_generator(
                 self.val_gen,
                 (
-                    (tf.float32, (tf.int32, tf.int32)),  # feats
+                    (tf.float32, (tf.int32, tf.int32, tf.int32)),  # feats
                     tf.float32,  # y_obs
                     tf.int32,  # id
+                    tf.float32,  # scale
                 )
             )
         return dataset

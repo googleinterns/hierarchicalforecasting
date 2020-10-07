@@ -79,7 +79,6 @@ class FixedRNN(keras.Model):
         return all_feats
     
     def get_fixed(self, feats, y_prev, nid, scale):
-        y_prev /= scale
         y_prev = tf.expand_dims(y_prev, -1)  # t/2 x b x 1
 
         node_emb = self.get_node_emb(nid)  # b x h
@@ -117,7 +116,8 @@ class FixedRNN(keras.Model):
             outputs = self.output_trans(outputs)  # t x b x h
 
         fixed_effect = tf.reduce_sum(outputs * loadings, axis=-1)  # t x b
-        fixed_effect *= scale
+        fixed_effect = tf.math.softplus(fixed_effect)
+
         return fixed_effect
     
     def regularizers(self, nid):
@@ -164,7 +164,8 @@ class FixedRNN(keras.Model):
         ''' 
         with tf.GradientTape() as tape:
             pred = self(feats, y_obs[:flags.pred_hor], nid, scale)  # t x b
-            lrmse = tf.square(tf.math.log(pred) - tf.math.log(y_obs[flags.pred_hor:]))  # t x b
+            lrmse = tf.square(tf.math.log(
+                (pred + 1/scale) / (y_obs[flags.pred_hor:] + 1/scale)))  # t x b
             lrmse = tf.sqrt(tf.reduce_mean(lrmse, axis=0))  # b
             lrmse = tf.reduce_mean(lrmse)
             loss = lrmse + self.regularizers(nid)
@@ -172,7 +173,7 @@ class FixedRNN(keras.Model):
         grads = tape.gradient(loss, self.trainable_variables)
         optimizer.apply_gradients(zip(grads, self.trainable_variables))
 
-        print(self.trainable_variables)
+        # print(self.trainable_variables)
 
         return loss, lrmse
 
@@ -184,7 +185,8 @@ class FixedRNN(keras.Model):
             assert(feats[0].numpy().shape[0] == 2 * pred_hor)
 
             y_pred = self(feats, y_obs[:pred_hor], nid, scale)
-            lrmse = tf.square(tf.math.log(y_pred) - tf.math.log(y_obs[pred_hor:]))  # t x b
+            lrmse = tf.square(tf.math.log(
+                (y_pred + 1/scale) / (y_obs[flags.pred_hor:] + 1/scale)))  # t x b
             lrmse = tf.sqrt(tf.reduce_mean(lrmse, axis=0))  # b
             lrmse = lrmse.numpy()
 

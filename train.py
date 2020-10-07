@@ -23,8 +23,8 @@ def main(_):
         print(f'\t--{flag.name}={flag._value}')
 
     # Load data
-    if flags.dataset == 'm5':
-        data = data_loader.M5Data()
+    if flags.dataset == 'fav':
+        data = data_loader.Favorita()
     else:
         raise ValueError(f'Unknown dataset {flags.dataset}')
 
@@ -49,7 +49,7 @@ def main(_):
     step = tf.Variable(0)
 
     # LR scheduling
-    boundaries = flags.train_epochs * np.asarray([0.4, 0.7])
+    boundaries = flags.train_epochs * np.asarray([0.6, 0.8])
     boundaries = boundaries.astype(np.int32).tolist()
 
     lr = flags.learning_rate * np.asarray([1, 0.1, 0.01])
@@ -89,6 +89,7 @@ def main(_):
         iterator = tqdm(data.tf_dataset(train=True), mininterval=2)
         for i, (feats, y_obs, nid, scale) in enumerate(iterator):
             loss, rmse = model.train_step(feats, y_obs, nid, scale, optimizer)
+            # sys.exit(1)
             # Train metrics
             summary.update({
                 'train/loss': loss,

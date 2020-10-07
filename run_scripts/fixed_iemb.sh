@@ -6,8 +6,9 @@ do
     echo "RUN ${i}"
     echo
     python train.py \
-    --expt=iemb_rerun/run_${i} --random_seed=${i} --model=fixed \
-    --batch_size=500 --l2_reg_weight=1.0 --l1_reg_weight=0.0 --node_emb_dim=16 \
-    --overparam=True --output_scaling=True --emb_as_inp=True \
-    --train_epochs=25 --learning_rate=0.01
+    --expt=iemb_add/run_${i} --random_seed=${i} --model=fixed --hierarchy=sibling_reg \
+    --batch_size=200 --l2_reg_weight=0.01 --l2_weight_slack=0.01 \
+    --l1_reg_weight=0.0 --node_emb_dim=16 --fixed_lstm_hidden=4 \
+    --overparam=False --output_scaling=False --emb_as_inp=True \
+    --train_epochs=14 --learning_rate=0.05
 done

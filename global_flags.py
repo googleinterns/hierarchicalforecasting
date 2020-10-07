@@ -10,7 +10,7 @@ flags.DEFINE_integer('train_epochs', 25, 'Number of epochs to train')
 flags.DEFINE_integer('batch_size', None, 'Batch size for the randomly sampled batch')
 
 # flags.DEFINE_integer('cont_len', 28, 'Length of the historical context')
-flags.DEFINE_integer('pred_hor', 28, 'Length of the prediction horizon')
+flags.DEFINE_integer('pred_hor', 20, 'Length of the prediction horizon')
 
 flags.DEFINE_integer('fixed_lstm_hidden', 16,
                     'Number of LSTM hidden units in the local model')
