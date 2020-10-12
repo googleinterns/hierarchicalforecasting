@@ -170,8 +170,10 @@ class FixedRNN(keras.Model):
             lrmse = tf.reduce_mean(lrmse)
             loss = lrmse + self.regularizers(nid)
 
-        grads = tape.gradient(loss, self.trainable_variables)
-        optimizer.apply_gradients(zip(grads, self.trainable_variables))
+        tv = self.trainable_variables
+        # tv = [v for v in self.trainable_variables if 'embed' in v.name]
+        grads = tape.gradient(loss, tv)
+        optimizer.apply_gradients(zip(grads, tv))
 
         # print(self.trainable_variables)
 

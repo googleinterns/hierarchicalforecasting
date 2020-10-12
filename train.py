@@ -115,6 +115,15 @@ def main(_):
         eval_save_path = os.path.join(expt_dir, 'eval.pkl')
         with open(eval_save_path, 'wb') as fout:
             pickle.dump(eval_dict, fout)
+    
+    emb = model.get_node_emb(np.arange(data.num_ts))
+    emb = emb.numpy()
+    h = flags.hierarchy
+    if h is None:
+        h = ""
+    fname = f'scratch/emb_{h}.pkl'
+    with open(fname, 'wb') as fout:
+        pickle.dump(emb, fout)
 
 
 class Summary:

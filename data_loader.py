@@ -31,6 +31,7 @@ class Favorita:
         self.ts_data /= self.scale
 
     def read_data(self):
+        global NUM_TIME_STEPS
         data_path = os.path.join(flags.favorita_dir, 'aggregate_sales10.csv')
         feats_path = os.path.join(flags.favorita_dir, 'holidays_events.csv')
         pkl_path = os.path.join(flags.favorita_dir, 'data.pkl')
@@ -123,6 +124,12 @@ class Favorita:
             with open(pkl_path, 'wb') as fout:
                 pickle.dump((self.tree, self.num_ts, self.ts_data, feats),
                             fout)
+
+        if flags.load_alternate:
+            with open('data/favorita/alternate_ts.pkl', 'rb') as fin:
+                self.ts_data = pickle.load(fin)
+            NUM_TIME_STEPS = len(self.ts_data)
+            print('alternate_ts', NUM_TIME_STEPS)
     
     def compute_weights(self):
         levels = self.tree.levels
@@ -134,12 +141,12 @@ class Favorita:
 
     def train_gen(self):
         pred_hor = flags.pred_hor
-        tot_len = NUM_TIME_STEPS
+        all_idx = np.arange(NUM_TIME_STEPS - 3 * pred_hor)
 
-        num_data = tot_len - 3 * pred_hor
-        perm = np.random.permutation(num_data)
+        if flags.load_alternate:
+            all_idx = all_idx[flags.pred_hor:]
 
-        weights = self.w * (self.num_ts / flags.batch_size)
+        perm = np.random.permutation(all_idx)
 
         for i in perm:
             sub_feat_cont = self.global_cont_feats[i:i+2*pred_hor]
@@ -164,9 +171,24 @@ class Favorita:
         j = np.arange(self.num_ts)
         sub_scale = self.scale
         yield (sub_feat_cont, sub_feat_cat), sub_ts, j, sub_scale  # t x *
+    
+    def default_gen(self):
+        pred_hor = flags.pred_hor
+        tot_len = NUM_TIME_STEPS
+        for i in range(0, tot_len - 2 * pred_hor, pred_hor):
+            a = i
+            b = i + 2 * pred_hor
+            sub_ts = self.ts_data[a:b]
+            sub_feat_cont = self.global_cont_feats[a:b]
+            sub_feat_cat = tuple(
+                feat[a:b] for feat in self.global_cat_feats
+            )
+            j = np.arange(self.num_ts)
+            sub_scale = self.scale
+            yield (sub_feat_cont, sub_feat_cat), sub_ts, j, sub_scale  # t x *
 
     def tf_dataset(self, train):
-        if train:
+        if train==True:
             dataset = tf.data.Dataset.from_generator(
                 self.train_gen,
                 (
@@ -177,9 +199,19 @@ class Favorita:
                 )
             )
             dataset = dataset.prefetch(tf.data.experimental.AUTOTUNE)
-        else:
+        elif train==False:
             dataset = tf.data.Dataset.from_generator(
                 self.val_gen,
+                (
+                    (tf.float32, (tf.int32, tf.int32, tf.int32)),  # feats
+                    tf.float32,  # y_obs
+                    tf.int32,  # id
+                    tf.float32,  # scale
+                )
+            )
+        elif train is None:
+            dataset = tf.data.Dataset.from_generator(
+                self.default_gen,
                 (
                     (tf.float32, (tf.int32, tf.int32, tf.int32)),  # feats
                     tf.float32,  # y_obs
