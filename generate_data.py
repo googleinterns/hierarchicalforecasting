@@ -38,14 +38,14 @@ def main(_):
     
     ts_data = np.array([], dtype=np.float32).reshape((0, data.num_ts))
     iterator = tqdm(data.tf_dataset(train=None), mininterval=2)
-    for feats, y_obs, nid, scale in iterator:
+    for feats, y_obs, nid in iterator:
         if ts_data.shape[0] == 0:
             print(ts_data.shape, y_obs.shape)
-            ts_data = np.concatenate([ts_data, y_obs[:flags.pred_hor]])
-            y_obs = np.zeros((flags.pred_hor, data.num_ts), dtype=np.float32)
+            y_obs = np.random.rand(flags.cont_len, data.num_ts).astype(np.float32)
+            ts_data = np.concatenate([ts_data, y_obs])
         else:
-            y_obs = ts_data[-flags.pred_hor:]
-        pred = model(feats, y_obs, nid, scale)
+            y_obs = ts_data[-flags.cont_len:]
+        pred = model(feats, y_obs, nid)
         ts_data = np.concatenate([ts_data, pred])
     
     print(ts_data.shape, data.ts_data.shape)

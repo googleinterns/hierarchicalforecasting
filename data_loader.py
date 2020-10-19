@@ -27,8 +27,6 @@ class Favorita:
     def __init__(self):
         self.read_data()
         self.compute_weights()
-        self.scale = np.sum(np.abs(self.ts_data), axis=0)
-        self.ts_data /= self.scale
 
     def read_data(self):
         global NUM_TIME_STEPS
@@ -140,52 +138,52 @@ class Favorita:
         assert(np.abs(np.sum(self.w) - 1.0) <= 1e-5)
 
     def train_gen(self):
-        pred_hor = flags.pred_hor
-        all_idx = np.arange(NUM_TIME_STEPS - 3 * pred_hor)
+        cont_len = flags.cont_len
+        all_idx = np.arange(NUM_TIME_STEPS - 2 * cont_len)
 
         if flags.load_alternate:
-            all_idx = all_idx[flags.pred_hor:]
+            start_idx = flags.cont_len
+            if flags.data_fraction < 1.0:
+                start_idx = int((1 - flags.data_fraction) * NUM_TIME_STEPS)
+            all_idx = all_idx[start_idx:]
 
         perm = np.random.permutation(all_idx)
 
         for i in perm:
-            sub_feat_cont = self.global_cont_feats[i:i+2*pred_hor]
+            sub_feat_cont = self.global_cont_feats[i:i+cont_len+1]
             sub_feat_cat = tuple(
-                feat[i:i+2*pred_hor] for feat in self.global_cat_feats
+                feat[i:i+cont_len+1] for feat in self.global_cat_feats
             )
-            # j = np.random.choice(range(self.num_ts), size=flags.batch_size, replace=False)
             j = np.random.choice(range(self.num_ts), size=flags.batch_size, p=self.w)
-            sub_ts = self.ts_data[i:i+2*pred_hor, j]
-            sub_scale = self.scale[j]
-            yield (sub_feat_cont, sub_feat_cat), sub_ts, j, sub_scale  # t x *
+            sub_ts = self.ts_data[i:i+cont_len+1, j]
+            yield (sub_feat_cont, sub_feat_cat), sub_ts, j  # t x *
         
     def val_gen(self):
-        pred_hor = flags.pred_hor
-        tot_len = NUM_TIME_STEPS
-        start_idx = tot_len - 2 * pred_hor
-        sub_ts = self.ts_data[start_idx:tot_len]
-        sub_feat_cont = self.global_cont_feats[start_idx:tot_len]
-        sub_feat_cat = tuple(
-            feat[start_idx:tot_len] for feat in self.global_cat_feats
-        )
-        j = np.arange(self.num_ts)
-        sub_scale = self.scale
-        yield (sub_feat_cont, sub_feat_cat), sub_ts, j, sub_scale  # t x *
+        cont_len = flags.cont_len
+        all_idx = np.arange(NUM_TIME_STEPS - 2 * cont_len, NUM_TIME_STEPS - cont_len - 1)
+
+        for i in all_idx:
+            sub_feat_cont = self.global_cont_feats[i:i+cont_len+1]
+            sub_feat_cat = tuple(
+                feat[i:i+cont_len+1] for feat in self.global_cat_feats
+            )
+            j = np.arange(self.num_ts)
+            sub_ts = self.ts_data[i:i+cont_len+1]
+            yield (sub_feat_cont, sub_feat_cat), sub_ts, j  # t x *
     
     def default_gen(self):
-        pred_hor = flags.pred_hor
+        cont_len = flags.cont_len
         tot_len = NUM_TIME_STEPS
-        for i in range(0, tot_len - 2 * pred_hor, pred_hor):
+        for i in range(0, tot_len - cont_len):
             a = i
-            b = i + 2 * pred_hor
+            b = i + cont_len + 1
             sub_ts = self.ts_data[a:b]
             sub_feat_cont = self.global_cont_feats[a:b]
             sub_feat_cat = tuple(
                 feat[a:b] for feat in self.global_cat_feats
             )
             j = np.arange(self.num_ts)
-            sub_scale = self.scale
-            yield (sub_feat_cont, sub_feat_cat), sub_ts, j, sub_scale  # t x *
+            yield (sub_feat_cont, sub_feat_cat), sub_ts, j  # t x *
 
     def tf_dataset(self, train):
         if train==True:
@@ -195,7 +193,6 @@ class Favorita:
                     (tf.float32, (tf.int32, tf.int32, tf.int32)),  # feats
                     tf.float32,  # y_obs
                     tf.int32,  # id
-                    tf.float32,  # scale
                 )
             )
             dataset = dataset.prefetch(tf.data.experimental.AUTOTUNE)
@@ -206,7 +203,6 @@ class Favorita:
                     (tf.float32, (tf.int32, tf.int32, tf.int32)),  # feats
                     tf.float32,  # y_obs
                     tf.int32,  # id
-                    tf.float32,  # scale
                 )
             )
         elif train is None:
@@ -216,7 +212,6 @@ class Favorita:
                     (tf.float32, (tf.int32, tf.int32, tf.int32)),  # feats
                     tf.float32,  # y_obs
                     tf.int32,  # id
-                    tf.float32,  # scale
                 )
             )
         return dataset

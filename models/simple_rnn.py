@@ -21,10 +21,14 @@ class FixedRNN(keras.Model):
         self.tree = tree
         # assert(flags.node_emb_dim == flags.fixed_lstm_hidden)
         self.node_emb = layers.Embedding(input_dim=self.num_ts,
-            output_dim=flags.node_emb_dim, name='node_embed')
+            output_dim=flags.node_emb_dim, name='node_embed',
+            embeddings_initializer=keras.initializers.RandomUniform(
+                seed=flags.emb_seed))
         if flags.hierarchy == 'sibling_reg':
             self.slack_emb = layers.Embedding(input_dim=self.num_ts,
-            output_dim=flags.node_emb_dim, name='slack_embed')
+            output_dim=flags.node_emb_dim, name='slack_embed',
+            embeddings_initializer=keras.initializers.RandomUniform(
+                seed=flags.emb_seed + 1))
         
         self.embs = [
             layers.Embedding(input_dim=dim, output_dim=min(MAX_FEAT_EMB_DIM, (dim+1)//2))
@@ -78,7 +82,7 @@ class FixedRNN(keras.Model):
         all_feats = tf.concat(all_feats, axis=-1)  # t x d
         return all_feats
     
-    def get_fixed(self, feats, y_prev, nid, scale):
+    def get_fixed(self, feats, y_prev, nid):
         y_prev = tf.expand_dims(y_prev, -1)  # t/2 x b x 1
 
         node_emb = self.get_node_emb(nid)  # b x h
@@ -88,12 +92,12 @@ class FixedRNN(keras.Model):
 
         if flags.emb_as_inp:
             node_id_feat = tf.expand_dims(node_emb, 0)  # 1 x b x h
-            node_id_feat = tf.repeat(node_id_feat, repeats=2*flags.pred_hor, axis=0)
+            node_id_feat = tf.repeat(node_id_feat, repeats=flags.cont_len + 1, axis=0)
                                         # t x b x h
             feats = tf.concat([node_id_feat, feats], axis=-1)  # t x b x d
 
-        feats_prev = feats[:flags.pred_hor]  # t/2 x b x d
-        feats_futr = feats[flags.pred_hor:]  # t/2 x b x d
+        feats_prev = feats[:flags.cont_len]  # t/2 x b x d
+        feats_futr = feats[flags.cont_len:]  # t/2 x b x d
 
         enc_inp = tf.concat([y_prev, feats_prev], axis=-1)  # t/2 x b x D'
 
@@ -140,7 +144,7 @@ class FixedRNN(keras.Model):
         return reg
 
     @tf.function
-    def call(self, feats, y_prev, nid, scale):
+    def call(self, feats, y_prev, nid):
         '''
         feats: t x d, t
         y_prev: t x b
@@ -150,12 +154,12 @@ class FixedRNN(keras.Model):
         feats = self.assemble_feats(feats)  # t x d
 
         # Computing fixed effects
-        fixed_effect = self.get_fixed(feats, y_prev, nid, scale)  # t x b
+        fixed_effect = self.get_fixed(feats, y_prev, nid)  # t x b
         # final_output = tf.math.softplus(final_output)  # n
         return fixed_effect
     
     @tf.function
-    def train_step(self, feats, y_obs, nid, scale, optimizer):
+    def train_step(self, feats, y_obs, nid, optimizer):
         '''
         feats:  b x t x d, b x t
         y_obs:  b x t
@@ -163,43 +167,40 @@ class FixedRNN(keras.Model):
         sw: b
         ''' 
         with tf.GradientTape() as tape:
-            pred = self(feats, y_obs[:flags.pred_hor], nid, scale)  # t x b
-            lrmse = tf.square(tf.math.log(
-                (pred + 1/scale) / (y_obs[flags.pred_hor:] + 1/scale)))  # t x b
-            lrmse = tf.sqrt(tf.reduce_mean(lrmse, axis=0))  # b
-            lrmse = tf.reduce_mean(lrmse)
-            loss = lrmse + self.regularizers(nid)
+            pred = self(feats, y_obs[:flags.cont_len], nid)  # t x 1
+            mae = tf.abs(pred - y_obs[flags.cont_len:])  # t x 1
+            mae = tf.reduce_mean(mae)
+            loss = mae + self.regularizers(nid)
 
         tv = self.trainable_variables
         # tv = [v for v in self.trainable_variables if 'embed' in v.name]
         grads = tape.gradient(loss, tv)
         optimizer.apply_gradients(zip(grads, tv))
-
-        # print(self.trainable_variables)
-
-        return loss, lrmse
+        return loss, mae
 
     def eval(self, dataset, level_dict):
-        pred_hor = flags.pred_hor
+        cont_len = flags.cont_len
+        return_dict = {f'test/rmse@{d}':[] for d in level_dict}
 
-        for feats, y_obs, nid, scale in dataset:
-            assert(y_obs.numpy().shape[0] == 2 * pred_hor)
-            assert(feats[0].numpy().shape[0] == 2 * pred_hor)
+        for feats, y_obs, nid in dataset:
+            assert(y_obs.numpy().shape[0] == cont_len + 1)
+            assert(feats[0].numpy().shape[0] == cont_len + 1)
 
-            y_pred = self(feats, y_obs[:pred_hor], nid, scale)
-            lrmse = tf.square(tf.math.log(
-                (y_pred + 1/scale) / (y_obs[flags.pred_hor:] + 1/scale)))  # t x b
-            lrmse = tf.sqrt(tf.reduce_mean(lrmse, axis=0))  # b
-            lrmse = lrmse.numpy()
+            pred = self(feats, y_obs[:flags.cont_len], nid)  # t x 1
+            mae = tf.abs(pred - y_obs[flags.cont_len:])  # t x 1
+            mae = mae.numpy().ravel()
 
-            return_dict = {}
-            rmses = []
             for d in level_dict:
-                sub_mean = np.mean(lrmse[level_dict[d]])
-                rmses.append(sub_mean)
-                return_dict[f'test/rmse@{d}'] = sub_mean
+                sub_mean = np.mean(mae[level_dict[d]])
+                return_dict[f'test/rmse@{d}'].append(sub_mean)
 
-            return_dict['test/rmse'] = np.mean(rmses)
+        rmses = []
+        for key in return_dict:
+            mean = np.mean(return_dict[key])
+            rmses.append(mean)
+            return_dict[key] = mean
+
+        return_dict['test/rmse'] = np.mean(rmses)
 
         # np.save('notebooks/evals.npy', y_pred)
         return return_dict

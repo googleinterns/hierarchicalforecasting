@@ -87,8 +87,8 @@ def main(_):
         optimizer.learning_rate.assign(sch(step))
 
         iterator = tqdm(data.tf_dataset(train=True), mininterval=2)
-        for i, (feats, y_obs, nid, scale) in enumerate(iterator):
-            loss, rmse = model.train_step(feats, y_obs, nid, scale, optimizer)
+        for i, (feats, y_obs, nid) in enumerate(iterator):
+            loss, rmse = model.train_step(feats, y_obs, nid, optimizer)
             # sys.exit(1)
             # Train metrics
             summary.update({
