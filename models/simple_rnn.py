@@ -116,7 +116,6 @@ class FixedRNN(keras.Model):
             outputs = self.output_trans(outputs)  # t x b x h
 
         fixed_effect = tf.reduce_sum(outputs * loadings, axis=-1)  # t x b
-        fixed_effect = tf.math.softplus(fixed_effect)
 
         return fixed_effect
     
@@ -164,20 +163,18 @@ class FixedRNN(keras.Model):
         ''' 
         with tf.GradientTape() as tape:
             pred = self(feats, y_obs[:flags.pred_hor], nid, scale)  # t x b
-            lrmse = tf.square(tf.math.log(
-                (pred + 1/scale) / (y_obs[flags.pred_hor:] + 1/scale)))  # t x b
-            lrmse = tf.sqrt(tf.reduce_mean(lrmse, axis=0))  # b
-            lrmse = tf.reduce_mean(lrmse)
-            loss = lrmse + self.regularizers(nid)
+            rmse = tf.square(pred - y_obs[flags.pred_hor:])  # t x b
+            rmse = tf.sqrt(tf.reduce_mean(rmse, axis=0))  # b
+            rmse = tf.reduce_mean(rmse)
+            loss = rmse + self.regularizers(nid)
 
         tv = self.trainable_variables
-        # tv = [v for v in self.trainable_variables if 'embed' in v.name]
         grads = tape.gradient(loss, tv)
         optimizer.apply_gradients(zip(grads, tv))
 
         # print(self.trainable_variables)
 
-        return loss, lrmse
+        return loss, rmse
 
     def eval(self, dataset, level_dict):
         pred_hor = flags.pred_hor
@@ -187,19 +184,18 @@ class FixedRNN(keras.Model):
             assert(feats[0].numpy().shape[0] == 2 * pred_hor)
 
             y_pred = self(feats, y_obs[:pred_hor], nid, scale)
-            lrmse = tf.square(tf.math.log(
-                (y_pred + 1/scale) / (y_obs[flags.pred_hor:] + 1/scale)))  # t x b
-            lrmse = tf.sqrt(tf.reduce_mean(lrmse, axis=0))  # b
-            lrmse = lrmse.numpy()
+            rmse = tf.square(y_pred - y_obs[flags.pred_hor:])  # t x b
+            rmse = tf.sqrt(tf.reduce_mean(rmse, axis=0))  # b
+            rmse = rmse.numpy()
 
             return_dict = {}
             rmses = []
             for d in level_dict:
-                sub_mean = np.mean(lrmse[level_dict[d]])
+                sub_mean = np.mean(rmse[level_dict[d]])
                 rmses.append(sub_mean)
                 return_dict[f'test/rmse@{d}'] = sub_mean
 
             return_dict['test/rmse'] = np.mean(rmses)
 
-        # np.save('notebooks/evals.npy', y_pred)
+        np.save('notebooks/evals.npy', y_pred)
         return return_dict

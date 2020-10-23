@@ -27,7 +27,7 @@ class Favorita:
     def __init__(self):
         self.read_data()
         self.compute_weights()
-        self.scale = np.sum(np.abs(self.ts_data), axis=0)
+        self.scale = np.mean(np.abs(self.ts_data), axis=0)
         self.ts_data /= self.scale
 
     def read_data(self):
@@ -124,12 +124,6 @@ class Favorita:
             with open(pkl_path, 'wb') as fout:
                 pickle.dump((self.tree, self.num_ts, self.ts_data, feats),
                             fout)
-
-        if flags.load_alternate:
-            with open('data/favorita/alternate_ts.pkl', 'rb') as fin:
-                self.ts_data = pickle.load(fin)
-            NUM_TIME_STEPS = len(self.ts_data)
-            print('alternate_ts', NUM_TIME_STEPS)
     
     def compute_weights(self):
         levels = self.tree.levels
@@ -143,9 +137,9 @@ class Favorita:
         pred_hor = flags.pred_hor
         all_idx = np.arange(NUM_TIME_STEPS - 3 * pred_hor)
 
-        if flags.load_alternate:
-            all_idx = all_idx[flags.pred_hor:]
-
+        if flags.data_frac < 1.0:
+            start_idx = int((1-flags.data_frac) * NUM_TIME_STEPS)
+            all_idx = all_idx[start_idx:]
         perm = np.random.permutation(all_idx)
 
         for i in perm:
@@ -172,21 +166,6 @@ class Favorita:
         sub_scale = self.scale
         yield (sub_feat_cont, sub_feat_cat), sub_ts, j, sub_scale  # t x *
     
-    def default_gen(self):
-        pred_hor = flags.pred_hor
-        tot_len = NUM_TIME_STEPS
-        for i in range(0, tot_len - 2 * pred_hor, pred_hor):
-            a = i
-            b = i + 2 * pred_hor
-            sub_ts = self.ts_data[a:b]
-            sub_feat_cont = self.global_cont_feats[a:b]
-            sub_feat_cat = tuple(
-                feat[a:b] for feat in self.global_cat_feats
-            )
-            j = np.arange(self.num_ts)
-            sub_scale = self.scale
-            yield (sub_feat_cont, sub_feat_cat), sub_ts, j, sub_scale  # t x *
-
     def tf_dataset(self, train):
         if train==True:
             dataset = tf.data.Dataset.from_generator(
@@ -202,16 +181,6 @@ class Favorita:
         elif train==False:
             dataset = tf.data.Dataset.from_generator(
                 self.val_gen,
-                (
-                    (tf.float32, (tf.int32, tf.int32, tf.int32)),  # feats
-                    tf.float32,  # y_obs
-                    tf.int32,  # id
-                    tf.float32,  # scale
-                )
-            )
-        elif train is None:
-            dataset = tf.data.Dataset.from_generator(
-                self.default_gen,
                 (
                     (tf.float32, (tf.int32, tf.int32, tf.int32)),  # feats
                     tf.float32,  # y_obs

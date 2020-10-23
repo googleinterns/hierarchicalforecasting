@@ -29,12 +29,12 @@ flags.DEFINE_float('l2_weight_slack', 0.0,
                    'L2 regularization weight')
 flags.DEFINE_float('l1_reg_weight', 0.0,
                    'L1 regularization weight')
+flags.DEFINE_float('data_frac', 1.0,
+                   'Fraction of data to use for training')
 
 flags.DEFINE_boolean('overparam', False, 'Over parameterization')
 flags.DEFINE_boolean('output_scaling', False,
                      'Learning output scale parameters')
 flags.DEFINE_boolean('emb_as_inp', False,
                      'Whether to provide node embeddings as input')
-flags.DEFINE_boolean('load_alternate', False,
-                     'Whether to load the alternate TS data')
 FLAGS = flags.FLAGS
