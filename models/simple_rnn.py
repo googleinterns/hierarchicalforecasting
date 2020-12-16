@@ -12,11 +12,10 @@ MAX_FEAT_EMB_DIM = 50
 
 
 class FixedRNN(keras.Model):
-    def __init__(self, num_ts, cat_dims, tree):
+    def __init__(self, num_ts, tree):
         super().__init__()
 
         self.num_ts = num_ts
-        self.cat_dims = cat_dims
         
         self.tree = tree
         # assert(flags.node_emb_dim == flags.fixed_lstm_hidden)
@@ -29,11 +28,6 @@ class FixedRNN(keras.Model):
             output_dim=flags.node_emb_dim, name='slack_embed',
             embeddings_initializer=keras.initializers.RandomUniform(
                 seed=flags.emb_seed + 1))
-        
-        self.embs = [
-            layers.Embedding(input_dim=dim, output_dim=min(MAX_FEAT_EMB_DIM, (dim+1)//2))
-            for dim in self.cat_dims
-        ]
 
         self.encoder = layers.LSTM(flags.fixed_lstm_hidden,
                             return_state=True, time_major=True)
@@ -72,15 +66,15 @@ class FixedRNN(keras.Model):
         node_emb = tf.nn.embedding_lookup(embs, nid)
         return node_emb
 
-    def assemble_feats(self, feats):
-        feats_cont = feats[0]  # t x d
-        feats_cat = feats[1]  # [t, t]
-        feats_emb = [
-            emb(feat) for emb, feat in zip(self.embs, feats_cat)  # t x e
-        ]
-        all_feats = feats_emb + [feats_cont]  # [t x *]
-        all_feats = tf.concat(all_feats, axis=-1)  # t x d
-        return all_feats
+    # def assemble_feats(self, feats):
+    #     feats_cont = feats[0]  # t x d
+    #     feats_cat = feats[1]  # [t, t]
+    #     feats_emb = [
+    #         emb(feat) for emb, feat in zip(self.embs, feats_cat)  # t x e
+    #     ]
+    #     all_feats = feats_emb + [feats_cont]  # [t x *]
+    #     all_feats = tf.concat(all_feats, axis=-1)  # t x d
+    #     return all_feats
     
     def get_fixed(self, feats, y_prev, nid):
         y_prev = tf.expand_dims(y_prev, -1)  # t/2 x b x 1
@@ -120,7 +114,7 @@ class FixedRNN(keras.Model):
             outputs = self.output_trans(outputs)  # t x b x h
 
         fixed_effect = tf.reduce_sum(outputs * loadings, axis=-1)  # t x b
-        fixed_effect = tf.math.softplus(fixed_effect)
+        # fixed_effect = tf.math.softplus(fixed_effect)
 
         return fixed_effect
     
@@ -151,7 +145,7 @@ class FixedRNN(keras.Model):
         nid: b
         sw: b
         '''
-        feats = self.assemble_feats(feats)  # t x d
+        # feats = self.assemble_feats(feats)  # t x d
 
         # Computing fixed effects
         fixed_effect = self.get_fixed(feats, y_prev, nid)  # t x b
@@ -165,7 +159,7 @@ class FixedRNN(keras.Model):
         y_obs:  b x t
         nid: b
         sw: b
-        ''' 
+        '''
         with tf.GradientTape() as tape:
             pred = self(feats, y_obs[:flags.cont_len], nid)  # t x 1
             mae = tf.abs(pred - y_obs[flags.cont_len:])  # t x 1
@@ -184,7 +178,7 @@ class FixedRNN(keras.Model):
 
         for feats, y_obs, nid in dataset:
             assert(y_obs.numpy().shape[0] == cont_len + 1)
-            assert(feats[0].numpy().shape[0] == cont_len + 1)
+            assert(feats.numpy().shape[0] == cont_len + 1)
 
             pred = self(feats, y_obs[:flags.cont_len], nid)  # t x 1
             mae = tf.abs(pred - y_obs[flags.cont_len:])  # t x 1

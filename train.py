@@ -23,7 +23,7 @@ def main(_):
         print(f'\t--{flag.name}={flag._value}')
 
     # Load data
-    if flags.dataset == 'fav':
+    if flags.dataset == 'syn':
         data = data_loader.Favorita()
     else:
         raise ValueError(f'Unknown dataset {flags.dataset}')
@@ -31,8 +31,7 @@ def main(_):
     # Create model
     if flags.model == 'fixed':
         model = models.FixedRNN(
-            num_ts=data.num_ts, cat_dims=data.global_cat_dims,
-            tree=data.tree)
+            num_ts=data.num_ts, tree=data.tree)
     elif flags.model == 'random':
         model = models.RandomRNN(
             num_ts=data.num_ts, train_weights=train_weights, cat_dims=data.global_cat_dims)
@@ -116,14 +115,14 @@ def main(_):
         with open(eval_save_path, 'wb') as fout:
             pickle.dump(eval_dict, fout)
     
-    emb = model.get_node_emb(np.arange(data.num_ts))
-    emb = emb.numpy()
-    h = flags.hierarchy
-    if h is None:
-        h = ""
-    fname = f'scratch/emb_{h}.pkl'
-    with open(fname, 'wb') as fout:
-        pickle.dump(emb, fout)
+    # emb = model.get_node_emb(np.arange(data.num_ts))
+    # emb = emb.numpy()
+    # h = flags.hierarchy
+    # if h is None:
+    #     h = ""
+    # fname = f'scratch/emb_{h}.pkl'
+    # with open(fname, 'wb') as fout:
+    #     pickle.dump(emb, fout)
 
 
 class Summary:

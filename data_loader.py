@@ -13,121 +13,83 @@ from datetime import datetime
 
 flags = global_flags.FLAGS
 
-START = "2016-06-29"
-END = "2017-08-15"
+NUM_TIME_STEPS = 1000
 
-FORMAT = "%Y-%m-%d"
-START = datetime.strptime(START, FORMAT)
-END = datetime.strptime(END, FORMAT)
-DIFF = END-START
-
-NUM_TIME_STEPS = DIFF.days + 1
 
 class Favorita:
     def __init__(self):
-        self.read_data()
+        self.gen_data()
         self.compute_weights()
 
-    def read_data(self):
+    def gen_data(self):
         global NUM_TIME_STEPS
-        data_path = os.path.join(flags.favorita_dir, 'aggregate_sales10.csv')
-        feats_path = os.path.join(flags.favorita_dir, 'holidays_events.csv')
-        pkl_path = os.path.join(flags.favorita_dir, 'data.pkl')
 
-        try:
-            with open(pkl_path, 'rb') as fin:
-                print('Found pickle. Loading ...')
-                self.tree, self.num_ts, self.ts_data, \
-                    (self.global_cont_feats, self.global_cat_feats, self.global_cat_dims) \
-                        = pickle.load(fin)
-        except FileNotFoundError:
-            print('Pickle not found. Reading from csv ...')
-            df = pd.read_csv(data_path, sep=',')
-            df['date'] = pd.to_datetime(df.date)
-            df.sort_values(by='date', inplace=True)
+        '''
+        From https://stats.stackexchange.com/questions/125946/generate-a-time-series-comprising-seasonal-trend-and-remainder-components-in-r
+        '''
+        TS = []
+        d = 10
+        T = 1000
+        p = 10
+        for i in range(d):
+            gammas = [np.random.randn() for i in range(p)]
+            mu = 0
+            beta = 0
 
-            self.tree = Tree()
+            ts = []
+            for j in range(T):
+                gamma = -np.sum(gammas[-p+1:]) + np.random.randn() * 0.1
+                gammas.append(gamma)
+                mu = mu + beta + np.random.randn() * 0.1
+                beta += np.random.randn() * 0.0001
 
-            for item in df['item']:
-                item_id = item // 100
-                store_id = item % 100
-
-                if store_id == 0:
-                    continue
-                node_str = f'{item_id}_{store_id}'
-                self.tree.insert_seq(node_str)
-            self.tree.precompute()
+                y = mu + gamma + np.random.randn() * 0.1
+                ts.append(y)
             
-            self.num_ts = self.tree.num_nodes
-            print('NUM TS', self.num_ts)
-            self.ts_data = np.zeros((self.num_ts, NUM_TIME_STEPS), dtype=np.float32)
-            print(self.ts_data.shape)
+            TS.append(ts)
 
-            for row in tqdm(df[['item', 'date', 'unit_sales']].itertuples()):
-                item, date, sales = row[1], row[2], row[3]
-                if (item % 100) == 0:
-                    continue
-                node_str = f'{item // 100}_{item % 100}'
-                idx = (date - START).days
-                a_ids = self.tree.get_ancestor_ids(node_str)
-                self.ts_data[a_ids, idx] += sales
+        TS = np.array(TS).T
+        
+        n_1 = 10
+        n_2 = 10
 
-            # cols = df.columns
-            # node_str_idx = cols.get_loc(col_name) + 1
-            # d_1_idx = cols.get_loc('d_1') + 1
-            # d_n_idx = cols.get_loc(f'd_{NUM_TIME_STEPS}') + 1
-            # for row in tqdm(df.itertuples()):
-            #     node_str = row[node_str_idx]
-            #     a_ids = self.tree.get_ancestor_ids(node_str)
-            #     ts = np.asarray(row[d_1_idx : d_n_idx+1])
-            #     self.ts_data[a_ids] += ts
-            self.ts_data = self.ts_data.T
-            print('TS DATA', self.ts_data.shape)
-            
-            date_feats = []
-            for i in range(NUM_TIME_STEPS):
-                date = START + dt.timedelta(days=i)
-                date_feats.append(date.isocalendar()[1:3])
-            date_feats = minmax_scale(date_feats)
-            self.global_cont_feats = np.asarray(date_feats, dtype=np.float32)
-            print('CONT FEATS', self.global_cont_feats.shape)
+        root_node = np.random.randn(1, d) * 0.1
+        middle_nodes = root_node + np.random.randn(n_1, d) * 0.1
+        reps = np.repeat(middle_nodes, n_2, axis=0)
+        leaf_nodes = reps + np.random.randn(n_1 * n_2, d) * 0.03
 
-            features = pd.read_csv(feats_path, sep=',')
-            features['date'] = pd.to_datetime(features.date)
-            features.sort_values(by='date', inplace=True)
+        all_nodes = np.concatenate([root_node, middle_nodes, leaf_nodes])
 
-            self.global_cat_feats = []
-            self.global_cat_dims = []
+        node_strs = ['r']
+        for i in range(n_1):
+            node_strs.append(f'{i}')
+        
+        for i in range(n_1):
+            for j in range(n_2):
+                node_strs.append(f'{i}_{j}')
+        
+        assert(len(node_strs) == all_nodes.shape[0])
 
-            cat_feat_list = ['type', 'locale', 'locale_name']
-            for cat_feat_name in cat_feat_list:
-                feats = ['' for i in range(NUM_TIME_STEPS)]
-                for row in features[['date', cat_feat_name]].itertuples():
-                    date = row[1]
-                    idx = (date - START).days
-                    to_end = (END - date).days
-                    # print(date, START, idx, to_end)
-                    if idx < 0 or to_end < 0:
-                        continue
-                    event = row[2]
-                    feats[idx] = event
+        self.tree = Tree()
+        for nid in node_strs[1:]:  # excluding the root node
+            self.tree.insert_seq(nid)
+        self.tree.precompute()
 
-                feats = [[feat] for feat in feats]
-                enc = OrdinalEncoder(dtype=np.int32)
-                feats = enc.fit_transform(feats)
-                self.global_cat_feats.append(np.asarray(feats, dtype=np.int32).ravel())
-                self.global_cat_dims.append(len(enc.categories_[0]))
+        self.num_ts = self.tree.num_nodes
+        print('NUM TS', self.num_ts)
+        
+        perm = [None for _ in node_strs]
+        for i, node_str in enumerate(node_strs):
+            nid = self.tree.node_id[node_str]
+            assert(nid is not None)
+            perm[nid] = i
+        
+        perm_nodes = all_nodes[perm]
 
-            feats = (self.global_cont_feats, self.global_cat_feats, self.global_cat_dims)
-            with open(pkl_path, 'wb') as fout:
-                pickle.dump((self.tree, self.num_ts, self.ts_data, feats),
-                            fout)
-
-        if flags.load_alternate:
-            with open('data/favorita/alternate_ts.pkl', 'rb') as fin:
-                self.ts_data = pickle.load(fin)
-            NUM_TIME_STEPS = len(self.ts_data)
-            print('alternate_ts', NUM_TIME_STEPS)
+        self.ts_data = TS @ perm_nodes.T
+        print(self.ts_data.shape)
+        self.global_cont_feats = np.asarray([i % p for i in range(NUM_TIME_STEPS)])
+        self.global_cont_feats = self.global_cont_feats.reshape((-1, 1))
     
     def compute_weights(self):
         levels = self.tree.levels
@@ -141,56 +103,48 @@ class Favorita:
         cont_len = flags.cont_len
         all_idx = np.arange(NUM_TIME_STEPS - 2 * cont_len)
 
-        if flags.load_alternate:
-            start_idx = flags.cont_len
-            if flags.data_fraction < 1.0:
-                start_idx = int((1 - flags.data_fraction) * NUM_TIME_STEPS)
+        if flags.data_fraction < 1.0:
+            start_idx = int((1 - flags.data_fraction) * NUM_TIME_STEPS)
             all_idx = all_idx[start_idx:]
 
         perm = np.random.permutation(all_idx)
+        leaves = np.where(self.tree.leaf_vector)[0]
 
         for i in perm:
             sub_feat_cont = self.global_cont_feats[i:i+cont_len+1]
-            sub_feat_cat = tuple(
-                feat[i:i+cont_len+1] for feat in self.global_cat_feats
-            )
-            j = np.random.choice(range(self.num_ts), size=flags.batch_size, p=self.w)
-            sub_ts = self.ts_data[i:i+cont_len+1, j]
-            yield (sub_feat_cont, sub_feat_cat), sub_ts, j  # t x *
-        
+            sub_ts = self.ts_data[i:i+cont_len+1, leaves]
+            yield sub_feat_cont, sub_ts, leaves  # t x *
+
     def val_gen(self):
         cont_len = flags.cont_len
         all_idx = np.arange(NUM_TIME_STEPS - 2 * cont_len, NUM_TIME_STEPS - cont_len - 1)
 
         for i in all_idx:
             sub_feat_cont = self.global_cont_feats[i:i+cont_len+1]
-            sub_feat_cat = tuple(
-                feat[i:i+cont_len+1] for feat in self.global_cat_feats
-            )
             j = np.arange(self.num_ts)
             sub_ts = self.ts_data[i:i+cont_len+1]
-            yield (sub_feat_cont, sub_feat_cat), sub_ts, j  # t x *
+            yield sub_feat_cont, sub_ts, j  # t x *
     
-    def default_gen(self):
-        cont_len = flags.cont_len
-        tot_len = NUM_TIME_STEPS
-        for i in range(0, tot_len - cont_len):
-            a = i
-            b = i + cont_len + 1
-            sub_ts = self.ts_data[a:b]
-            sub_feat_cont = self.global_cont_feats[a:b]
-            sub_feat_cat = tuple(
-                feat[a:b] for feat in self.global_cat_feats
-            )
-            j = np.arange(self.num_ts)
-            yield (sub_feat_cont, sub_feat_cat), sub_ts, j  # t x *
+    # def default_gen(self):
+    #     cont_len = flags.cont_len
+    #     tot_len = NUM_TIME_STEPS
+    #     for i in range(0, tot_len - cont_len):
+    #         a = i
+    #         b = i + cont_len + 1
+    #         sub_ts = self.ts_data[a:b]
+    #         sub_feat_cont = self.global_cont_feats[a:b]
+    #         sub_feat_cat = tuple(
+    #             feat[a:b] for feat in self.global_cat_feats
+    #         )
+    #         j = np.arange(self.num_ts)
+    #         yield (sub_feat_cont, sub_feat_cat), sub_ts, j  # t x *
 
     def tf_dataset(self, train):
         if train==True:
             dataset = tf.data.Dataset.from_generator(
                 self.train_gen,
                 (
-                    (tf.float32, (tf.int32, tf.int32, tf.int32)),  # feats
+                    tf.float32,  # feats
                     tf.float32,  # y_obs
                     tf.int32,  # id
                 )
@@ -200,20 +154,20 @@ class Favorita:
             dataset = tf.data.Dataset.from_generator(
                 self.val_gen,
                 (
-                    (tf.float32, (tf.int32, tf.int32, tf.int32)),  # feats
+                    tf.float32,  # feats
                     tf.float32,  # y_obs
                     tf.int32,  # id
                 )
             )
-        elif train is None:
-            dataset = tf.data.Dataset.from_generator(
-                self.default_gen,
-                (
-                    (tf.float32, (tf.int32, tf.int32, tf.int32)),  # feats
-                    tf.float32,  # y_obs
-                    tf.int32,  # id
-                )
-            )
+        # elif train is None:
+        #     dataset = tf.data.Dataset.from_generator(
+        #         self.default_gen,
+        #         (
+        #             (tf.float32, (tf.int32, tf.int32, tf.int32)),  # feats
+        #             tf.float32,  # y_obs
+        #             tf.int32,  # id
+        #         )
+        #     )
         return dataset
 
 
