@@ -1,13 +1,8 @@
-set -e
 
-for i in {1..20}
-do
-    echo
-    echo "RUN ${i}"
-    echo
-    python train.py \
-    --expt=run_${i} --random_seed=${i} --model=fixed \
-    --batch_size=10 --node_emb_dim=16 --fixed_lstm_hidden=64 \
-    --overparam=True --output_scaling=False \
-    --train_epochs=30 --learning_rate=0.001
-done
+CUDA_VISIBLE_DEVICES='3' python train.py \
+    --expt=syn_factors --random_seed=0 --model=fixed \
+    --data_fraction=1.0 \
+    --batch_size=200 --l2_reg_weight=0.0 --l2_weight_slack=0.0 \
+    --l1_reg_weight=0.0 --node_emb_dim=1 --fixed_lstm_hidden=10 \
+    --overparam=False --output_scaling=False --emb_as_inp=False \
+    --train_epochs=30 --learning_rate=0.01

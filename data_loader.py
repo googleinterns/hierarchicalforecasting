@@ -28,7 +28,7 @@ class Favorita:
         From https://stats.stackexchange.com/questions/125946/generate-a-time-series-comprising-seasonal-trend-and-remainder-components-in-r
         '''
         TS = []
-        d = 10
+        d = flags.node_emb_dim
         T = 1000
         p = 10
         for i in range(d):
@@ -53,10 +53,21 @@ class Favorita:
         n_1 = 10
         n_2 = 10
 
-        root_node = np.random.randn(1, d) * 0.1
-        middle_nodes = root_node + np.random.randn(n_1, d) * 0.1
-        reps = np.repeat(middle_nodes, n_2, axis=0)
-        leaf_nodes = reps + np.random.randn(n_1 * n_2, d) * 0.03
+        # root_node = np.random.randn(1, d) * 0.1
+        # middle_nodes = root_node + np.random.randn(n_1, d) * 0.1
+        # reps = np.repeat(middle_nodes, n_2, axis=0)
+        # leaf_nodes = reps + np.random.randn(n_1 * n_2, d) * 0.03
+
+        root_node = [np.random.dirichlet(np.ones(d) / d * 10)]
+        middle_nodes = []
+        leaf_nodes = []
+
+        for i in range(n_1):
+            middle_node = np.random.dirichlet(root_node[0] * 7)
+            middle_nodes.append(middle_node)
+            for j in range(n_2):
+                leaf_node = np.random.dirichlet(middle_node * 3)
+                leaf_nodes.append(leaf_node)
 
         all_nodes = np.concatenate([root_node, middle_nodes, leaf_nodes])
 

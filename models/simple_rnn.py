@@ -23,46 +23,52 @@ class FixedRNN(keras.Model):
             output_dim=flags.node_emb_dim, name='node_embed',
             embeddings_initializer=keras.initializers.RandomUniform(
                 seed=flags.emb_seed))
-        if flags.hierarchy == 'sibling_reg':
-            self.slack_emb = layers.Embedding(input_dim=self.num_ts,
-            output_dim=flags.node_emb_dim, name='slack_embed',
-            embeddings_initializer=keras.initializers.RandomUniform(
-                seed=flags.emb_seed + 1))
 
-        self.encoder = layers.LSTM(flags.fixed_lstm_hidden,
-                            return_state=True, time_major=True)
-        self.decoder = layers.LSTM(flags.fixed_lstm_hidden,
-                            return_sequences=True, time_major=True)
-        if flags.emb_as_inp:
-            self.output_trans = layers.Dense(1, use_bias=False)
-        elif flags.overparam:
-            self.output_trans = layers.Dense(flags.node_emb_dim, use_bias=False)
+        self.encoders = []
+        self.decoders = []
+        self.output_layers = []
+
+        for i in range(flags.node_emb_dim):
+            encoder = layers.LSTM(flags.fixed_lstm_hidden,
+                                return_state=True, time_major=True)
+            decoder = layers.LSTM(flags.fixed_lstm_hidden,
+                                return_sequences=True, time_major=True)
+            self.encoders.append(encoder)
+            self.decoders.append(decoder)
         
-        if flags.output_scaling:
-            self.output_scale = layers.Embedding(input_dim=self.num_ts,
-                output_dim=1, embeddings_initializer=keras.initializers.ones,
-                name='output_scale')
+            output_layer = layers.Dense(1, use_bias=False)
+            self.output_layers.append(output_layer)
+        
+        # if flags.output_scaling:
+        #     self.output_scale = layers.Embedding(input_dim=self.num_ts,
+        #         output_dim=1, embeddings_initializer=keras.initializers.ones,
+        #         name='output_scale')
+
+    def get_normalized_emb(self):
+        self.node_emb(np.asarray([0], dtype=np.int32))  # creates the emb matrix
+        embs = tf.abs(self.node_emb.trainable_variables[0])
+        embs = embs / tf.reduce_sum(embs, axis=1, keepdims=True)
+        return embs
     
     def get_node_emb(self, nid):
-        self.node_emb(np.asarray([0], dtype=np.int32))  # creates the emb matrix
-        embs = self.node_emb.trainable_variables[0]
-        if flags.hierarchy == 'additive':
-            leaf_matrix = self.tree.leaf_matrix
-            num_leaves = np.sum(leaf_matrix, axis=1, keepdims=True)
-            leaf_matrix = leaf_matrix / num_leaves
-            embs = tf.matmul(leaf_matrix, embs)
-        elif flags.hierarchy == 'add_dev':
-            print('\n\tHIERARCHY: Additive deviations')
-            ancestor_matrix = self.tree.ancestor_matrix
-            embs = tf.matmul(ancestor_matrix, embs)
-        elif flags.hierarchy == 'sibling_reg':
-            print('\n\tHIERARCHY: Sibling regularization')
-            self.slack_emb(np.asarray([0], dtype=np.int32))  # creates the emb matrix
-            slack_embs = self.slack_emb.trainable_variables[0]
-            ancestor_matrix = self.tree.ancestor_matrix
-            diag = np.diag(np.diag(ancestor_matrix))
-            embs = tf.matmul(ancestor_matrix, embs) + \
-                   tf.matmul(ancestor_matrix - diag, slack_embs)
+        embs = self.get_normalized_emb()
+        # if flags.hierarchy == 'additive':
+        #     leaf_matrix = self.tree.leaf_matrix
+        #     num_leaves = np.sum(leaf_matrix, axis=1, keepdims=True)
+        #     leaf_matrix = leaf_matrix / num_leaves
+        #     embs = tf.matmul(leaf_matrix, embs)
+        # elif flags.hierarchy == 'add_dev':
+        #     print('\n\tHIERARCHY: Additive deviations')
+        #     ancestor_matrix = self.tree.ancestor_matrix
+        #     embs = tf.matmul(ancestor_matrix, embs)
+        # elif flags.hierarchy == 'sibling_reg':
+        #     print('\n\tHIERARCHY: Sibling regularization')
+        #     self.slack_emb(np.asarray([0], dtype=np.int32))  # creates the emb matrix
+        #     slack_embs = self.slack_emb.trainable_variables[0]
+        #     ancestor_matrix = self.tree.ancestor_matrix
+        #     diag = np.diag(np.diag(ancestor_matrix))
+        #     embs = tf.matmul(ancestor_matrix, embs) + \
+        #            tf.matmul(ancestor_matrix - diag, slack_embs)
         node_emb = tf.nn.embedding_lookup(embs, nid)
         return node_emb
 
@@ -84,12 +90,6 @@ class FixedRNN(keras.Model):
         feats = tf.expand_dims(feats, 1)  # t x 1 x d
         feats = tf.repeat(feats, repeats=nid.shape[0], axis=1)  # t x b x d
 
-        if flags.emb_as_inp:
-            node_id_feat = tf.expand_dims(node_emb, 0)  # 1 x b x h
-            node_id_feat = tf.repeat(node_id_feat, repeats=flags.cont_len + 1, axis=0)
-                                        # t x b x h
-            feats = tf.concat([node_id_feat, feats], axis=-1)  # t x b x d
-
         feats_prev = feats[:flags.cont_len]  # t/2 x b x d
         feats_futr = feats[flags.cont_len:]  # t/2 x b x d
 
@@ -97,21 +97,17 @@ class FixedRNN(keras.Model):
 
         loadings = tf.expand_dims(node_emb, 0)  # 1 x b x h
         
-        if flags.output_scaling:
-            output_scale = self.output_scale(nid)  # b x 1
-            output_scale = tf.expand_dims(output_scale, 0)  # 1 x b x 1
-            if flags.emb_as_inp:
-                loadings = output_scale
-            else:
-                loadings = loadings * output_scale
-        elif flags.emb_as_inp:
-            loadings = 1.0
+        outputs = []
+        for e, d, o in zip(self.encoders, self.decoders, self.output_layers):
+            _, h, c = e(inputs=enc_inp)  # b x h
+            output = d(inputs=feats_futr, initial_state=(h, c))  # t x b x h
+            output = o(output)  # t x b x 1
+            outputs.append(output)
 
-        _, h, c = self.encoder(inputs=enc_inp)  # b x h
-        outputs = self.decoder(inputs=feats_futr, initial_state=(h, c))  # t x b x h
+        outputs = tf.concat(outputs, axis=-1)  # t x b x h
 
-        if flags.emb_as_inp or flags.overparam:
-            outputs = self.output_trans(outputs)  # t x b x h
+        # if flags.emb_as_inp or flags.overparam:
+        #     outputs = self.output_trans(outputs)  # t x b x h
 
         fixed_effect = tf.reduce_sum(outputs * loadings, axis=-1)  # t x b
         # fixed_effect = tf.math.softplus(fixed_effect)
@@ -119,22 +115,35 @@ class FixedRNN(keras.Model):
         return fixed_effect
     
     def regularizers(self, nid):
-        reg = 0.0
-        if flags.l2_reg_weight > 0.0:
-            print('\nL2 reg: True')
-            embs = self.node_emb.trainable_variables[0]  # n x e
-            l2 = tf.reduce_mean(tf.square(embs))
-            reg = reg + flags.l2_reg_weight * l2
-        if flags.l2_weight_slack > 0.0:
-            print('\nL2 reg slack: True')
-            slack_embs = self.slack_emb.trainable_variables[0]
-            l2 = tf.reduce_mean(tf.square(slack_embs))
-            reg = reg + flags.l2_weight_slack * l2
-        if flags.l1_reg_weight > 0.0:
-            node_emb = self.get_node_emb(np.arange(self.num_ts))
-            l1 = tf.reduce_mean(tf.abs(node_emb), axis=1)
-            l1 = tf.reduce_mean(self.tree.leaf_vector * l1)
-            reg = reg + flags.l1_reg_weight * l1
+        # reg = 0.0
+        # if flags.l2_reg_weight > 0.0:
+        #     print('\nL2 reg: True')
+        #     embs = self.node_emb.trainable_variables[0]  # n x e
+        #     l2 = tf.reduce_mean(tf.square(embs))
+        #     reg = reg + flags.l2_reg_weight * l2
+        # if flags.l2_weight_slack > 0.0:
+        #     print('\nL2 reg slack: True')
+        #     slack_embs = self.slack_emb.trainable_variables[0]
+        #     l2 = tf.reduce_mean(tf.square(slack_embs))
+        #     reg = reg + flags.l2_weight_slack * l2
+        # if flags.l1_reg_weight > 0.0:
+        #     node_emb = self.get_node_emb(np.arange(self.num_ts))
+        #     l1 = tf.reduce_mean(tf.abs(node_emb), axis=1)
+        #     l1 = tf.reduce_mean(self.tree.leaf_vector * l1)
+        #     reg = reg + flags.l1_reg_weight * l1
+        
+        A = self.tree.adj_matrix  # n x n
+        A = np.expand_dims(A, axis=0)  # 1 x n x n
+
+        embs = self.get_normalized_emb()  # n x e
+        embs = tf.transpose(embs)  # e x n
+        emb_1 = tf.expand_dims(embs, axis=-1)  # e x n x 1
+        emb_2 = tf.expand_dims(embs, axis=-2)  # e x 1 x n
+        
+        edge_diff = emb_1 * A - emb_2 * A
+        edge_diff = tf.abs(edge_diff)  ## Change here for L1/L2 regularization
+        reg = flags.l2_reg_weight * tf.reduce_mean(edge_diff)
+
         return reg
 
     @tf.function
