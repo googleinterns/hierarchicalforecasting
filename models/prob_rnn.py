@@ -20,9 +20,7 @@ class RandomRNN(FixedRNN):
     def __init__(self, num_ts, train_weights):
         super().__init__(num_ts, train_weights)
 
-        self.lstm_var = layers.LSTM(
-            flags.var_lstm_hidden, return_sequences=False, time_major=True
-        )
+        self.lstm_var = layers.LSTM(flags.var_lstm_hidden, return_sequences=False, time_major=True)
         self.dense_var = layers.Dense(1)
 
     # TODO: update the feature processing step
@@ -33,17 +31,13 @@ class RandomRNN(FixedRNN):
         """
         y_feats = tf.expand_dims(y_prev, -1)  # t x n x 1
         stat_feats = tf.expand_dims(feats, axis=1)  # t x 1 x d
-        stat_feats = tf.repeat(
-            stat_feats, repeats=self.num_ts, axis=1
-        )  # t x n x d
+        stat_feats = tf.repeat(stat_feats, repeats=self.num_ts, axis=1)  # t x n x d
 
         emb = self.get_node_emb()
         emb = tf.expand_dims(emb, axis=0)  # 1 x n x e
         emb = tf.repeat(emb, repeats=self.time_steps, axis=0)  # t x n x e
 
-        local_feats = tf.concat(
-            [y_feats, stat_feats, emb], axis=-1
-        )  # t x n x D'
+        local_feats = tf.concat([y_feats, stat_feats, emb], axis=-1)  # t x n x D'
 
         sig_outputs = self.lstm_var(local_feats)  # n x h
         sig = self.dense_var(sig_outputs)  # n x 1
@@ -90,9 +84,7 @@ class RandomRNN(FixedRNN):
         pred_path = y_prev
 
         for i in range(pred_hor):
-            mean, sig = self.call(
-                feats[i : i + cont_len], pred_path[i : i + cont_len]
-            )
+            mean, sig = self.call(feats[i : i + cont_len], pred_path[i : i + cont_len])
             pred = mean + sig * tf.random.normal(sig.shape)
             pred = np.clip(pred.numpy(), a_min=0, a_max=None).reshape((1, -1))
             pred_path = np.concatenate([pred_path, pred], axis=0)
@@ -122,9 +114,7 @@ class RandomRNN(FixedRNN):
             diff = np.expand_dims(y_obs[-pred_hor:], 0) - quantiles  # p x t x n
             q_lt_y = np.greater(diff, 0, dtype=np.float32)  # p x t x n
             spl = diff * q_lt_y * p.reshape((-1, 1, 1))
-            spl += (
-                -diff * (1.0 - q_lt_y) * (1.0 - p.reshape((-1, 1, 1)))
-            )  # p x t x n
+            spl += -diff * (1.0 - q_lt_y) * (1.0 - p.reshape((-1, 1, 1)))  # p x t x n
 
             mean = np.mean(spl, axis=0)  # t x n
             mean = np.mean(mean, axis=0)  # n

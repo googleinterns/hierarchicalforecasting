@@ -99,9 +99,7 @@ class Favorita:
 
         self.ts_data = TS @ perm_nodes.T
         print(self.ts_data.shape)
-        self.global_cont_feats = np.asarray(
-            [i % p for i in range(NUM_TIME_STEPS)]
-        )
+        self.global_cont_feats = np.asarray([i % p for i in range(NUM_TIME_STEPS)])
         self.global_cont_feats = self.global_cont_feats.reshape((-1, 1))
 
     def compute_weights(self):
@@ -130,9 +128,7 @@ class Favorita:
 
     def val_gen(self):
         cont_len = flags.cont_len
-        all_idx = np.arange(
-            NUM_TIME_STEPS - 2 * cont_len, NUM_TIME_STEPS - cont_len - 1
-        )
+        all_idx = np.arange(NUM_TIME_STEPS - 2 * cont_len, NUM_TIME_STEPS - cont_len - 1)
 
         for i in all_idx:
             sub_feat_cont = self.global_cont_feats[i : i + cont_len + 1]
@@ -157,14 +153,12 @@ class Favorita:
     def tf_dataset(self, train):
         if train == True:
             dataset = tf.data.Dataset.from_generator(
-                self.train_gen,
-                (tf.float32, tf.float32, tf.int32,),  # feats  # y_obs  # id
+                self.train_gen, (tf.float32, tf.float32, tf.int32,),  # feats  # y_obs  # id
             )
             dataset = dataset.prefetch(tf.data.experimental.AUTOTUNE)
         elif train == False:
             dataset = tf.data.Dataset.from_generator(
-                self.val_gen,
-                (tf.float32, tf.float32, tf.int32,),  # feats  # y_obs  # id
+                self.val_gen, (tf.float32, tf.float32, tf.int32,),  # feats  # y_obs  # id
             )
         # elif train is None:
         #     dataset = tf.data.Dataset.from_generator(

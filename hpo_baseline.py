@@ -44,11 +44,7 @@ def main():
             ]
             with open("logs/hpo.log", "w") as fout:
                 subprocess.run(
-                    cmd,
-                    check=True,
-                    stdout=fout,
-                    stderr=subprocess.STDOUT,
-                    text=True,
+                    cmd, check=True, stdout=fout, stderr=subprocess.STDOUT, text=True,
                 )
         hparams["evals"] = []
         for i in range(10):

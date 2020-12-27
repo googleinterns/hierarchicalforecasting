@@ -31,9 +31,7 @@ def main(_):
 
     # Create model
     if flags.model == "fixed":
-        model = models.FixedRNN(
-            num_ts=data.num_ts, cat_dims=data.global_cat_dims, tree=data.tree
-        )
+        model = models.FixedRNN(num_ts=data.num_ts, cat_dims=data.global_cat_dims, tree=data.tree)
     else:
         raise ValueError(f"Unknown model {flags.model}")
 
@@ -42,9 +40,7 @@ def main(_):
     for feats, y_obs, nid in iterator:
         if ts_data.shape[0] == 0:
             print(ts_data.shape, y_obs.shape)
-            y_obs = np.random.rand(flags.cont_len, data.num_ts).astype(
-                np.float32
-            )
+            y_obs = np.random.rand(flags.cont_len, data.num_ts).astype(np.float32)
             ts_data = np.concatenate([ts_data, y_obs])
         else:
             y_obs = ts_data[-flags.cont_len :]

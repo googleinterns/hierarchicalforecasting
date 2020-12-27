@@ -53,17 +53,11 @@ def main():
             ]
             with open("logs/hpo.log", "w") as fout:
                 subprocess.run(
-                    cmd,
-                    check=True,
-                    stdout=fout,
-                    stderr=subprocess.STDOUT,
-                    text=True,
+                    cmd, check=True, stdout=fout, stderr=subprocess.STDOUT, text=True,
                 )
         hparams["evals"] = []
         for i in range(10):
-            with open(
-                f"logs/m5/fixed_sibling_reg/hpo/run_{i}/eval.pkl", "rb"
-            ) as fin:
+            with open(f"logs/m5/fixed_sibling_reg/hpo/run_{i}/eval.pkl", "rb") as fin:
                 eval_dict = pickle.load(fin)
             hparams["evals"].append(eval_dict)
 

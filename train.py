@@ -34,9 +34,7 @@ def main(_):
         model = models.FixedRNN(num_ts=data.num_ts, tree=data.tree)
     elif flags.model == "random":
         model = models.RandomRNN(
-            num_ts=data.num_ts,
-            train_weights=train_weights,
-            cat_dims=data.global_cat_dims,
+            num_ts=data.num_ts, train_weights=train_weights, cat_dims=data.global_cat_dims,
         )
     else:
         raise ValueError(f"Unknown model {flags.model}")
@@ -56,13 +54,9 @@ def main(_):
     lr = flags.learning_rate * np.asarray([1, 0.1, 0.01])
     lr = lr.tolist()
 
-    sch = keras.optimizers.schedules.PiecewiseConstantDecay(
-        boundaries=boundaries, values=lr
-    )
+    sch = keras.optimizers.schedules.PiecewiseConstantDecay(boundaries=boundaries, values=lr)
     # optimizer = keras.optimizers.Adam()
-    optimizer = keras.optimizers.SGD(
-        learning_rate=0.01, momentum=0.9, nesterov=True
-    )
+    optimizer = keras.optimizers.SGD(learning_rate=0.01, momentum=0.9, nesterov=True)
 
     # Checkpointing
     ckpt = tf.train.Checkpoint(step=step, optimizer=optimizer, model=model)
@@ -137,9 +131,7 @@ class Summary:
     def write(self, step):
         with self.writer.as_default():
             for metric in self.metric_dict:
-                tf.summary.scalar(
-                    metric, self.metric_dict[metric].result(), step=step
-                )
+                tf.summary.scalar(metric, self.metric_dict[metric].result(), step=step)
         self.metric_dict = {}
         self.writer.flush()
 
