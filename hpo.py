@@ -6,6 +6,7 @@ import pickle
 import shutil
 import json
 
+
 def main():
     for it in range(100):
         batch_size = int(2 ** np.random.uniform(6, 8))
@@ -25,44 +26,60 @@ def main():
             "ep": ep,
             "lr": lr,
             "lstm_hidden": lstm_hidden,
-            "l1": l1
+            "l1": l1,
         }
-        print(f'HPARAMS run {it}:', hparams)
+        print(f"HPARAMS run {it}:", hparams)
 
-        shutil.rmtree('logs/m5/fixed_sibling_reg/hpo/', ignore_errors=True)
+        shutil.rmtree("logs/m5/fixed_sibling_reg/hpo/", ignore_errors=True)
 
         for i in range(10):
-            cmd = ["python", "train.py", f"--expt=hpo/run_{i}",
-                f"--random_seed={i}", "--model=fixed", "--hierarchy=sibling_reg",
-                f"--batch_size={batch_size}", f"--l2_reg_weight={l2}",
-                f"--l2_weight_slack={l2_slack}", f"--l1_reg_weight={l1}",
-                f"--node_emb_dim={node_emb}", f"--fixed_lstm_hidden={lstm_hidden}",
-                "--overparam=True", "--output_scaling=True", f"--train_epochs={ep}",
-                f"--learning_rate={lr}"]
-            with open('logs/hpo.log', 'w') as fout:
+            cmd = [
+                "python",
+                "train.py",
+                f"--expt=hpo/run_{i}",
+                f"--random_seed={i}",
+                "--model=fixed",
+                "--hierarchy=sibling_reg",
+                f"--batch_size={batch_size}",
+                f"--l2_reg_weight={l2}",
+                f"--l2_weight_slack={l2_slack}",
+                f"--l1_reg_weight={l1}",
+                f"--node_emb_dim={node_emb}",
+                f"--fixed_lstm_hidden={lstm_hidden}",
+                "--overparam=True",
+                "--output_scaling=True",
+                f"--train_epochs={ep}",
+                f"--learning_rate={lr}",
+            ]
+            with open("logs/hpo.log", "w") as fout:
                 subprocess.run(
-                    cmd, check=True, stdout=fout, stderr=subprocess.STDOUT,
-                    text=True
+                    cmd,
+                    check=True,
+                    stdout=fout,
+                    stderr=subprocess.STDOUT,
+                    text=True,
                 )
-        hparams['evals'] = []
+        hparams["evals"] = []
         for i in range(10):
-            with open(f'logs/m5/fixed_sibling_reg/hpo/run_{i}/eval.pkl', 'rb') as fin:
+            with open(
+                f"logs/m5/fixed_sibling_reg/hpo/run_{i}/eval.pkl", "rb"
+            ) as fin:
                 eval_dict = pickle.load(fin)
-            hparams['evals'].append(eval_dict)
-        
+            hparams["evals"].append(eval_dict)
+
         write(hparams)
 
 
 def write(hparams):
-    hpo_file = 'hpo_results.pkl'
+    hpo_file = "hpo_results.pkl"
     try:
-        with open(hpo_file, 'rb') as fin:
+        with open(hpo_file, "rb") as fin:
             results = pickle.load(fin)
     except FileNotFoundError:
         results = []
-    
+
     results.append(hparams)
-    with open(hpo_file, 'wb') as fout:
+    with open(hpo_file, "wb") as fout:
         pickle.dump(results, fout)
 
 

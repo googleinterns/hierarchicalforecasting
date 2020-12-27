@@ -24,9 +24,9 @@ class Favorita:
     def gen_data(self):
         global NUM_TIME_STEPS
 
-        '''
+        """
         From https://stats.stackexchange.com/questions/125946/generate-a-time-series-comprising-seasonal-trend-and-remainder-components-in-r
-        '''
+        """
         TS = []
         d = flags.node_emb_dim
         T = 1000
@@ -38,18 +38,18 @@ class Favorita:
 
             ts = []
             for j in range(T):
-                gamma = -np.sum(gammas[-p+1:]) + np.random.randn() * 0.1
+                gamma = -np.sum(gammas[-p + 1 :]) + np.random.randn() * 0.1
                 gammas.append(gamma)
                 mu = mu + beta + np.random.randn() * 0.1
                 beta += np.random.randn() * 0.0001
 
                 y = mu + gamma + np.random.randn() * 0.1
                 ts.append(y)
-            
+
             TS.append(ts)
 
         TS = np.array(TS).T
-        
+
         n_1 = 10
         n_2 = 10
 
@@ -71,15 +71,15 @@ class Favorita:
 
         all_nodes = np.concatenate([root_node, middle_nodes, leaf_nodes])
 
-        node_strs = ['r']
+        node_strs = ["r"]
         for i in range(n_1):
-            node_strs.append(f'{i}')
-        
+            node_strs.append(f"{i}")
+
         for i in range(n_1):
             for j in range(n_2):
-                node_strs.append(f'{i}_{j}')
-        
-        assert(len(node_strs) == all_nodes.shape[0])
+                node_strs.append(f"{i}_{j}")
+
+        assert len(node_strs) == all_nodes.shape[0]
 
         self.tree = Tree()
         for nid in node_strs[1:]:  # excluding the root node
@@ -87,28 +87,30 @@ class Favorita:
         self.tree.precompute()
 
         self.num_ts = self.tree.num_nodes
-        print('NUM TS', self.num_ts)
-        
+        print("NUM TS", self.num_ts)
+
         perm = [None for _ in node_strs]
         for i, node_str in enumerate(node_strs):
             nid = self.tree.node_id[node_str]
-            assert(nid is not None)
+            assert nid is not None
             perm[nid] = i
-        
+
         perm_nodes = all_nodes[perm]
 
         self.ts_data = TS @ perm_nodes.T
         print(self.ts_data.shape)
-        self.global_cont_feats = np.asarray([i % p for i in range(NUM_TIME_STEPS)])
+        self.global_cont_feats = np.asarray(
+            [i % p for i in range(NUM_TIME_STEPS)]
+        )
         self.global_cont_feats = self.global_cont_feats.reshape((-1, 1))
-    
+
     def compute_weights(self):
         levels = self.tree.levels
         self.w = np.ones(self.num_ts)
         for _, level in levels.items():
             self.w[level] /= len(level)
         self.w /= len(levels)
-        assert(np.abs(np.sum(self.w) - 1.0) <= 1e-5)
+        assert np.abs(np.sum(self.w) - 1.0) <= 1e-5
 
     def train_gen(self):
         cont_len = flags.cont_len
@@ -122,20 +124,22 @@ class Favorita:
         leaves = np.where(self.tree.leaf_vector)[0]
 
         for i in perm:
-            sub_feat_cont = self.global_cont_feats[i:i+cont_len+1]
-            sub_ts = self.ts_data[i:i+cont_len+1, leaves]
+            sub_feat_cont = self.global_cont_feats[i : i + cont_len + 1]
+            sub_ts = self.ts_data[i : i + cont_len + 1, leaves]
             yield sub_feat_cont, sub_ts, leaves  # t x *
 
     def val_gen(self):
         cont_len = flags.cont_len
-        all_idx = np.arange(NUM_TIME_STEPS - 2 * cont_len, NUM_TIME_STEPS - cont_len - 1)
+        all_idx = np.arange(
+            NUM_TIME_STEPS - 2 * cont_len, NUM_TIME_STEPS - cont_len - 1
+        )
 
         for i in all_idx:
-            sub_feat_cont = self.global_cont_feats[i:i+cont_len+1]
+            sub_feat_cont = self.global_cont_feats[i : i + cont_len + 1]
             j = np.arange(self.num_ts)
-            sub_ts = self.ts_data[i:i+cont_len+1]
+            sub_ts = self.ts_data[i : i + cont_len + 1]
             yield sub_feat_cont, sub_ts, j  # t x *
-    
+
     # def default_gen(self):
     #     cont_len = flags.cont_len
     #     tot_len = NUM_TIME_STEPS
@@ -151,24 +155,16 @@ class Favorita:
     #         yield (sub_feat_cont, sub_feat_cat), sub_ts, j  # t x *
 
     def tf_dataset(self, train):
-        if train==True:
+        if train == True:
             dataset = tf.data.Dataset.from_generator(
                 self.train_gen,
-                (
-                    tf.float32,  # feats
-                    tf.float32,  # y_obs
-                    tf.int32,  # id
-                )
+                (tf.float32, tf.float32, tf.int32,),  # feats  # y_obs  # id
             )
             dataset = dataset.prefetch(tf.data.experimental.AUTOTUNE)
-        elif train==False:
+        elif train == False:
             dataset = tf.data.Dataset.from_generator(
                 self.val_gen,
-                (
-                    tf.float32,  # feats
-                    tf.float32,  # y_obs
-                    tf.int32,  # id
-                )
+                (tf.float32, tf.float32, tf.int32,),  # feats  # y_obs  # id
             )
         # elif train is None:
         #     dataset = tf.data.Dataset.from_generator(
@@ -183,7 +179,7 @@ class Favorita:
 
 
 class Tree:
-    root = 'r'
+    root = "r"
 
     def __init__(self):
         self.parent = {}
@@ -192,20 +188,20 @@ class Tree:
         self.id_node = {}
 
         self.insert_node(self.root, None)
-    
+
     @property
     def num_nodes(self):
         return len(self.node_id)
-    
+
     @staticmethod
     def get_ancestors(node_path):
         ancestors = []
         for i, c in enumerate(node_path):
-            if c == '_':
+            if c == "_":
                 ancestors.append(node_path[:i])
         ancestors.append(node_path)
         return ancestors
-    
+
     def insert_node(self, node_str, par_str):
         if node_str in self.node_id:
             return
@@ -216,14 +212,14 @@ class Tree:
         self.children[node_str] = []
         if par_str is not None:
             self.children[par_str].append(node_str)
-    
+
     def insert_seq(self, node_path):
         ancestors = self.get_ancestors(node_path)
         par = self.root
         for a in ancestors:
             self.insert_node(a, par)
             par = a
-    
+
     def get_ancestor_ids(self, node_str):
         ids = []
         node = node_str
@@ -231,11 +227,11 @@ class Tree:
             ids.append(self.node_id[node])
             node = self.parent[node]
         return ids
-    
+
     def precompute(self):
         self.init_levels()
         self.init_matrix()
-    
+
     def init_matrix(self):
         n = len(self.node_id)
         self.leaf_matrix = np.zeros((n, n), dtype=np.float32)
@@ -245,7 +241,7 @@ class Tree:
         self.leaf_vector = np.zeros(n, dtype=np.float32)
 
         self._dfs(self.root, [])
-    
+
     def _dfs(self, node_str, ancestors):
         nid = self.node_id[node_str]
         if len(ancestors):
@@ -261,17 +257,17 @@ class Tree:
         else:
             for ch in self.children[node_str]:
                 self._dfs(ch, ancestors)
-    
+
     def init_levels(self):
         self.levels = {}
         self._levels_rec(self.root, 0)
-    
+
     def _levels_rec(self, node_str, depth):
         if depth not in self.levels:
             self.levels[depth] = []
         self.levels[depth].append(self.node_id[node_str])
         for ch in self.children[node_str]:
-            self._levels_rec(ch, depth+1)
+            self._levels_rec(ch, depth + 1)
 
 
 def main(_):
@@ -321,4 +317,3 @@ def main(_):
 
 if __name__ == "__main__":
     app.run(main)
-

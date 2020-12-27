@@ -14,36 +14,38 @@ from tqdm import tqdm
 
 flags = global_flags.FLAGS
 
+
 def main(_):
     tf.random.set_seed(flags.random_seed)
     np.random.seed(flags.random_seed)
-    
-    print('FLAGS:')
-    for flag in flags.flags_by_module_dict()['global_flags']:
-        print(f'\t--{flag.name}={flag._value}')
+
+    print("FLAGS:")
+    for flag in flags.flags_by_module_dict()["global_flags"]:
+        print(f"\t--{flag.name}={flag._value}")
 
     # Load data
-    if flags.dataset == 'syn':
+    if flags.dataset == "syn":
         data = data_loader.Favorita()
     else:
-        raise ValueError(f'Unknown dataset {flags.dataset}')
+        raise ValueError(f"Unknown dataset {flags.dataset}")
 
     # Create model
-    if flags.model == 'fixed':
-        model = models.FixedRNN(
-            num_ts=data.num_ts, tree=data.tree)
-    elif flags.model == 'random':
+    if flags.model == "fixed":
+        model = models.FixedRNN(num_ts=data.num_ts, tree=data.tree)
+    elif flags.model == "random":
         model = models.RandomRNN(
-            num_ts=data.num_ts, train_weights=train_weights, cat_dims=data.global_cat_dims)
+            num_ts=data.num_ts,
+            train_weights=train_weights,
+            cat_dims=data.global_cat_dims,
+        )
     else:
-        raise ValueError(f'Unknown model {flags.model}')
-    
+        raise ValueError(f"Unknown model {flags.model}")
+
     # Compute path to experiment directory
     model_name = flags.model
     if flags.hierarchy is not None:
-        model_name += '_' + flags.hierarchy
-    expt_dir = os.path.join('./logs',
-        flags.dataset, model_name, flags.expt)
+        model_name += "_" + flags.hierarchy
+    expt_dir = os.path.join("./logs", flags.dataset, model_name, flags.expt)
 
     step = tf.Variable(0)
 
@@ -55,23 +57,24 @@ def main(_):
     lr = lr.tolist()
 
     sch = keras.optimizers.schedules.PiecewiseConstantDecay(
-        boundaries=boundaries, values=lr)
+        boundaries=boundaries, values=lr
+    )
     # optimizer = keras.optimizers.Adam()
-    optimizer = keras.optimizers.SGD(learning_rate=0.01, momentum=0.9,
-                                     nesterov=True)
+    optimizer = keras.optimizers.SGD(
+        learning_rate=0.01, momentum=0.9, nesterov=True
+    )
 
     # Checkpointing
-    ckpt = tf.train.Checkpoint(step=step, optimizer=optimizer,
-        model=model)
+    ckpt = tf.train.Checkpoint(step=step, optimizer=optimizer, model=model)
     ckpt_manager = tf.train.CheckpointManager(ckpt, expt_dir, max_to_keep=5)
     ckpt_path = ckpt_manager.latest_checkpoint
     ckpt.restore(ckpt_path)
 
     if ckpt_path is None:
-        print('*' * 10, 'Checkpoint not found. Initializing ...')
+        print("*" * 10, "Checkpoint not found. Initializing ...")
     else:
-        print('*' * 10, f'Checkpoint found. Restoring from {ckpt_path}')
-    
+        print("*" * 10, f"Checkpoint found. Restoring from {ckpt_path}")
+
     summary = Summary(expt_dir)
 
     # eval_dict = model.eval(data.tf_dataset(train=False), data.tree.levels)
@@ -81,7 +84,7 @@ def main(_):
 
     while step.numpy() < flags.train_epochs:
         ep = step.numpy()
-        print(f'Epoch {ep}')
+        print(f"Epoch {ep}")
         sys.stdout.flush()
         optimizer.learning_rate.assign(sch(step))
 
@@ -90,31 +93,26 @@ def main(_):
             loss, rmse = model.train_step(feats, y_obs, nid, optimizer)
             # sys.exit(1)
             # Train metrics
-            summary.update({
-                'train/loss': loss,
-                'train/rmse': rmse
-            })
+            summary.update({"train/loss": loss, "train/rmse": rmse})
             if i % 100 == 0:
-                mean_loss = summary.metric_dict['train/loss'].result().numpy()
-                iterator.set_description(f'Loss {mean_loss:.4f}')
+                mean_loss = summary.metric_dict["train/loss"].result().numpy()
+                iterator.set_description(f"Loss {mean_loss:.4f}")
         step.assign_add(1)
         ckpt_manager.save()
 
         # Other metrics
-        summary.update({
-            'train/learning_rate': optimizer.learning_rate.numpy()
-        })
-        
+        summary.update({"train/learning_rate": optimizer.learning_rate.numpy()})
+
         # Test metrics
         eval_dict = model.eval(data.tf_dataset(train=False), data.tree.levels)
         print(eval_dict)
         summary.update(eval_dict)
         summary.write(step=step.numpy())
 
-        eval_save_path = os.path.join(expt_dir, 'eval.pkl')
-        with open(eval_save_path, 'wb') as fout:
+        eval_save_path = os.path.join(expt_dir, "eval.pkl")
+        with open(eval_save_path, "wb") as fout:
             pickle.dump(eval_dict, fout)
-    
+
     # emb = model.get_node_emb(np.arange(data.num_ts))
     # emb = emb.numpy()
     # h = flags.hierarchy
@@ -129,17 +127,19 @@ class Summary:
     def __init__(self, log_dir):
         self.metric_dict = {}
         self.writer = tf.summary.create_file_writer(log_dir)
-    
+
     def update(self, update_dict):
         for metric in update_dict:
             if metric not in self.metric_dict:
                 self.metric_dict[metric] = keras.metrics.Mean()
             self.metric_dict[metric].update_state(values=[update_dict[metric]])
-    
+
     def write(self, step):
         with self.writer.as_default():
             for metric in self.metric_dict:
-                tf.summary.scalar(metric, self.metric_dict[metric].result(), step=step)
+                tf.summary.scalar(
+                    metric, self.metric_dict[metric].result(), step=step
+                )
         self.metric_dict = {}
         self.writer.flush()
 

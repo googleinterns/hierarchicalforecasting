@@ -16,29 +16,34 @@ class FixedRNN(keras.Model):
         super().__init__()
 
         self.num_ts = num_ts
-        
         self.tree = tree
         # assert(flags.node_emb_dim == flags.fixed_lstm_hidden)
-        self.node_emb = layers.Embedding(input_dim=self.num_ts,
-            output_dim=flags.node_emb_dim, name='node_embed',
+        self.node_emb = layers.Embedding(
+            input_dim=self.num_ts,
+            output_dim=flags.node_emb_dim,
+            name="node_embed",
             embeddings_initializer=keras.initializers.RandomUniform(
-                seed=flags.emb_seed))
-
+                seed=flags.emb_seed
+            ),
+        )
+        self.var_params = tf.Variable(
+            np.random.uniform(size=[1, self.num_ts])
+        )  # variance parameters for the dirichilet distributions in the cascade
         self.encoders = []
         self.decoders = []
         self.output_layers = []
 
         for i in range(flags.node_emb_dim):
-            encoder = layers.LSTM(flags.fixed_lstm_hidden,
-                                return_state=True, time_major=True)
-            decoder = layers.LSTM(flags.fixed_lstm_hidden,
-                                return_sequences=True, time_major=True)
+            encoder = layers.LSTM(
+                flags.fixed_lstm_hidden, return_state=True, time_major=True
+            )
+            decoder = layers.LSTM(
+                flags.fixed_lstm_hidden, return_sequences=True, time_major=True
+            )
             self.encoders.append(encoder)
             self.decoders.append(decoder)
-        
             output_layer = layers.Dense(1, use_bias=False)
             self.output_layers.append(output_layer)
-        
         # if flags.output_scaling:
         #     self.output_scale = layers.Embedding(input_dim=self.num_ts,
         #         output_dim=1, embeddings_initializer=keras.initializers.ones,
@@ -49,7 +54,7 @@ class FixedRNN(keras.Model):
         embs = tf.abs(self.node_emb.trainable_variables[0])
         embs = embs / tf.reduce_sum(embs, axis=1, keepdims=True)
         return embs
-    
+
     def get_node_emb(self, nid):
         embs = self.get_normalized_emb()
         # if flags.hierarchy == 'additive':
@@ -81,22 +86,21 @@ class FixedRNN(keras.Model):
     #     all_feats = feats_emb + [feats_cont]  # [t x *]
     #     all_feats = tf.concat(all_feats, axis=-1)  # t x d
     #     return all_feats
-    
+
     def get_fixed(self, feats, y_prev, nid):
         y_prev = tf.expand_dims(y_prev, -1)  # t/2 x b x 1
 
         node_emb = self.get_node_emb(nid)  # b x h
-        
         feats = tf.expand_dims(feats, 1)  # t x 1 x d
         feats = tf.repeat(feats, repeats=nid.shape[0], axis=1)  # t x b x d
 
-        feats_prev = feats[:flags.cont_len]  # t/2 x b x d
-        feats_futr = feats[flags.cont_len:]  # t/2 x b x d
+        feats_prev = feats[: flags.cont_len]  # t/2 x b x d
+        feats_futr = feats[flags.cont_len :]  # t/2 x b x d
 
         enc_inp = tf.concat([y_prev, feats_prev], axis=-1)  # t/2 x b x D'
 
         loadings = tf.expand_dims(node_emb, 0)  # 1 x b x h
-        
+
         outputs = []
         for e, d, o in zip(self.encoders, self.decoders, self.output_layers):
             _, h, c = e(inputs=enc_inp)  # b x h
@@ -113,7 +117,7 @@ class FixedRNN(keras.Model):
         # fixed_effect = tf.math.softplus(fixed_effect)
 
         return fixed_effect
-    
+
     def regularizers(self, nid):
         # reg = 0.0
         # if flags.l2_reg_weight > 0.0:
@@ -131,7 +135,7 @@ class FixedRNN(keras.Model):
         #     l1 = tf.reduce_mean(tf.abs(node_emb), axis=1)
         #     l1 = tf.reduce_mean(self.tree.leaf_vector * l1)
         #     reg = reg + flags.l1_reg_weight * l1
-        
+
         A = self.tree.adj_matrix  # n x n
         A = np.expand_dims(A, axis=0)  # 1 x n x n
 
@@ -139,39 +143,59 @@ class FixedRNN(keras.Model):
         embs = tf.transpose(embs)  # e x n
         emb_1 = tf.expand_dims(embs, axis=-1)  # e x n x 1
         emb_2 = tf.expand_dims(embs, axis=-2)  # e x 1 x n
-        
+
         edge_diff = emb_1 * A - emb_2 * A
         edge_diff = tf.abs(edge_diff)  ## Change here for L1/L2 regularization
         reg = flags.l2_reg_weight * tf.reduce_mean(edge_diff)
 
         return reg
 
+    def dirichilet_cascade_mle(self):
+        """Implement dirichilet cascade mle.
+        """
+        A = self.tree.adj_matrix  # n x n
+        A = np.expand_dims(A, axis=0)  # 1 x n x n
+
+        embs = self.get_normalized_emb()  # n x e
+        embs = tf.transpose(embs)  # e x n
+        emb_1 = tf.expand_dims(embs, axis=-1)  # e x n x 1
+        var_params = tf.expand_dims(self.var_params, axis=-1)  # 1 x n x 1
+        emb_1 = emb_1 * var_params  # e x n x 1
+        emb_2 = tf.expand_dims(embs, axis=-2)  # e x 1 x n
+        neg_mle = (emb_1 * A - 1.0) * tf.math.log(emb_2 * A)  # e x n x n
+        neg_mle = tf.reduce_sum(neg_mle, axis=0)  # n x n
+        b_alpha = emb_1 * A
+        b_alpha_1 = tf.reduce_sum(tf.math.lgamma(b_alpha), axis=0)
+        b_alpha_2 = tf.math.lgamma(tf.reduce_sum(b_alpha, axis=0))
+        total_loss = b_alpha_1 - b_alpha_2 - neg_mle
+        return flags.mle_reg_weight * tf.reduce_mean(total_loss)
+
     @tf.function
     def call(self, feats, y_prev, nid):
-        '''
+        """
         feats: t x d, t
         y_prev: t x b
         nid: b
         sw: b
-        '''
+        """
         # feats = self.assemble_feats(feats)  # t x d
 
         # Computing fixed effects
         fixed_effect = self.get_fixed(feats, y_prev, nid)  # t x b
         # final_output = tf.math.softplus(final_output)  # n
         return fixed_effect
-    
+
     @tf.function
     def train_step(self, feats, y_obs, nid, optimizer):
-        '''
+        """
         feats:  b x t x d, b x t
         y_obs:  b x t
         nid: b
         sw: b
-        '''
+        """
         with tf.GradientTape() as tape:
-            pred = self(feats, y_obs[:flags.cont_len], nid)  # t x 1
-            mae = tf.abs(pred - y_obs[flags.cont_len:])  # t x 1
+            pred = self(feats, y_obs[: flags.cont_len], nid)  # t x 1
+            mae = tf.abs(pred - y_obs[flags.cont_len :])  # t x 1
             mae = tf.reduce_mean(mae)
             loss = mae + self.regularizers(nid)
 
@@ -183,19 +207,19 @@ class FixedRNN(keras.Model):
 
     def eval(self, dataset, level_dict):
         cont_len = flags.cont_len
-        return_dict = {f'test/rmse@{d}':[] for d in level_dict}
+        return_dict = {f"test/rmse@{d}": [] for d in level_dict}
 
         for feats, y_obs, nid in dataset:
-            assert(y_obs.numpy().shape[0] == cont_len + 1)
-            assert(feats.numpy().shape[0] == cont_len + 1)
+            assert y_obs.numpy().shape[0] == cont_len + 1
+            assert feats.numpy().shape[0] == cont_len + 1
 
-            pred = self(feats, y_obs[:flags.cont_len], nid)  # t x 1
-            mae = tf.abs(pred - y_obs[flags.cont_len:])  # t x 1
+            pred = self(feats, y_obs[: flags.cont_len], nid)  # t x 1
+            mae = tf.abs(pred - y_obs[flags.cont_len :])  # t x 1
             mae = mae.numpy().ravel()
 
             for d in level_dict:
                 sub_mean = np.mean(mae[level_dict[d]])
-                return_dict[f'test/rmse@{d}'].append(sub_mean)
+                return_dict[f"test/rmse@{d}"].append(sub_mean)
 
         rmses = []
         for key in return_dict:
@@ -203,7 +227,7 @@ class FixedRNN(keras.Model):
             rmses.append(mean)
             return_dict[key] = mean
 
-        return_dict['test/rmse'] = np.mean(rmses)
+        return_dict["test/rmse"] = np.mean(rmses)
 
         # np.save('notebooks/evals.npy', y_pred)
         return return_dict
