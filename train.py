@@ -49,11 +49,11 @@ def main(_):
     step = tf.Variable(0)
 
     # LR scheduling
-    num_changes = 7
+    num_changes = 9
     boundaries = flags.train_epochs * np.linspace(0.1, 0.9, num_changes-1)
     boundaries = boundaries.astype(np.int32).tolist()
 
-    lr = flags.learning_rate * np.asarray([0.5**(i) for i in range(num_changes)])
+    lr = flags.learning_rate * np.asarray([0.5**(i+1) for i in range(num_changes)])
     lr = lr.tolist()
 
     sch = keras.optimizers.schedules.PiecewiseConstantDecay(boundaries=boundaries, values=lr)

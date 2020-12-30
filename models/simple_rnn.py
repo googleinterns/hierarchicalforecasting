@@ -42,8 +42,8 @@ class FixedRNN(keras.Model):
 
     def get_normalized_emb(self):
         # self.node_emb(np.asarray([0], dtype=np.int32))  # creates the emb matrix
-        embs = tf.abs(self.node_emb)
-        #embs = tf.nn.softmax(self.node_emb, axis=1)
+        #embs = tf.abs(self.node_emb)
+        embs = tf.nn.softmax(self.node_emb, axis=1)
         embs = embs / tf.reduce_sum(embs, axis=1, keepdims=True)
         return embs
 
@@ -113,7 +113,7 @@ class FixedRNN(keras.Model):
     def regularizers(self, nid):
         if flags.l2_reg_weight <= 0.0:
             return tf.constant(0.0)
-        return self.dirichilet_cascade_mle() # activate this for dirichilet mle
+        # return self.dirichilet_cascade_mle() # activate this for dirichilet mle
 
         A = self.tree.adj_matrix  # n x n
         A = np.expand_dims(A, axis=0)  # 1 x n x n
