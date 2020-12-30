@@ -3,6 +3,7 @@ import sys
 import tensorflow as tf
 import numpy as np
 import pickle
+from pathlib import Path
 
 import global_flags
 import data_loader
@@ -75,7 +76,9 @@ def main(_):
     # print(eval_dict)
     # summary.update(eval_dict)
     # summary.write(step=step.numpy())
-
+    best_loss = 1e7
+    pat = 0
+    best_check_path = None
     while step.numpy() < flags.train_epochs:
         ep = step.numpy()
         print(f"Epoch {ep}")
@@ -100,6 +103,20 @@ def main(_):
         # Test metrics
         eval_dict = model.eval(data.tf_dataset(train=False), data.tree.levels)
         print(eval_dict)
+        eval_loss = eval_dict[f"test/rmse@{2}"]
+        if eval_loss < best_loss:
+            best_loss = eval_loss
+            best_check_path = ckpt_manager.latest_checkpoint
+            pat = 0
+            print("saved best model so far...")
+        else:
+            pat += 1
+            if pat > flags.patience:
+                print("early stopped with best loss: {}".format(best_loss))
+                print("best model at: {}".format(best_check_path))
+                break
+
+
         summary.update(eval_dict)
         summary.write(step=step.numpy())
 

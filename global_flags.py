@@ -16,6 +16,7 @@ flags.DEFINE_integer("var_lstm_hidden", 10, "Number of LSTM hidden units in the 
 flags.DEFINE_integer("node_emb_dim", 16, "Dimension of the node embeddings")
 flags.DEFINE_integer("random_seed", None, "The random seed to be used for TF and numpy")
 flags.DEFINE_integer("emb_seed", None, "The random seed to be used only for the embeddings")
+flags.DEFINE_integer("patience", 7, "Patience for early stopping")
 
 flags.DEFINE_float("learning_rate", 0.001, "Learning rate")
 flags.DEFINE_float("l2_reg_weight", 0.0, "L2 regularization weight")

@@ -18,11 +18,11 @@ class FixedRNN(keras.Model):
         self.num_ts = num_ts
         self.tree = tree
         self.node_emb = tf.Variable(
-            np.random.uniform(size=[self.num_ts, flags.node_emb_dim]).astype(np.float32)
+            np.random.uniform(size=[self.num_ts, flags.node_emb_dim]).astype(np.float32),
         )
         print("Node embs dim: {}".format(flags.node_emb_dim))
         self.var_params = tf.Variable(
-            np.random.uniform(size=[1, self.num_ts]).astype(np.float32)
+            np.ones(shape=[1, self.num_ts]).astype(np.float32)
         )  # variance parameters for the dirichilet distributions in the cascade
         self.encoders = []
         self.decoders = []
@@ -43,6 +43,7 @@ class FixedRNN(keras.Model):
     def get_normalized_emb(self):
         # self.node_emb(np.asarray([0], dtype=np.int32))  # creates the emb matrix
         embs = tf.abs(self.node_emb)
+        #embs = tf.nn.softmax(self.node_emb, axis=1)
         embs = embs / tf.reduce_sum(embs, axis=1, keepdims=True)
         return embs
 
@@ -110,23 +111,10 @@ class FixedRNN(keras.Model):
         return fixed_effect
 
     def regularizers(self, nid):
-        # reg = 0.0
-        # if flags.l2_reg_weight > 0.0:
-        #     print('\nL2 reg: True')
-        #     embs = self.node_emb.trainable_variables[0]  # n x e
-        #     l2 = tf.reduce_mean(tf.square(embs))
-        #     reg = reg + flags.l2_reg_weight * l2
-        # if flags.l2_weight_slack > 0.0:
-        #     print('\nL2 reg slack: True')
-        #     slack_embs = self.slack_emb.trainable_variables[0]
-        #     l2 = tf.reduce_mean(tf.square(slack_embs))
-        #     reg = reg + flags.l2_weight_slack * l2
-        # if flags.l1_reg_weight > 0.0:
-        #     node_emb = self.get_node_emb(np.arange(self.num_ts))
-        #     l1 = tf.reduce_mean(tf.abs(node_emb), axis=1)
-        #     l1 = tf.reduce_mean(self.tree.leaf_vector * l1)
-        #     reg = reg + flags.l1_reg_weight * l1
-        return self.dirichilet_cascade_mle()
+        if flags.l2_reg_weight <= 0.0:
+            return tf.constant(0.0)
+        #return self.dirichilet_cascade_mle() # activate this for dirichilet mle
+
         A = self.tree.adj_matrix  # n x n
         A = np.expand_dims(A, axis=0)  # 1 x n x n
 
@@ -136,7 +124,7 @@ class FixedRNN(keras.Model):
         emb_2 = tf.expand_dims(embs, axis=-2)  # e x 1 x n
 
         edge_diff = emb_1 * A - emb_2 * A
-        edge_diff = tf.abs(edge_diff)  ## Change here for L1/L2 regularization
+        edge_diff = tf.square(edge_diff)  ## Change here for L1/L2 regularization
         reg = flags.l2_reg_weight * tf.reduce_mean(edge_diff)
 
         return reg
