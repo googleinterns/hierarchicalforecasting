@@ -141,7 +141,7 @@ class FixedRNN(keras.Model):
         emb_2 = tf.expand_dims(embs, axis=-2)  # e x 1 x n
         
         edge_diff = emb_1 * A - emb_2 * A
-        edge_diff = tf.abs(edge_diff)  ## Change here for L1/L2 regularization
+        edge_diff = edge_diff * edge_diff  ## Change here for L1/L2 regularization
         reg = flags.l2_reg_weight * tf.reduce_mean(edge_diff)
 
         return reg
