@@ -1,5 +1,5 @@
 
-CUDA_VISIBLE_DEVICES='3' python train.py \
+python train.py \
     --expt=syn_factors --random_seed=0 --model=fixed \
     --data_fraction=1.0 \
     --batch_size=200 --l2_reg_weight=1.0 --l2_weight_slack=0.0 \
