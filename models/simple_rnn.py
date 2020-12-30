@@ -113,7 +113,7 @@ class FixedRNN(keras.Model):
     def regularizers(self, nid):
         if flags.l2_reg_weight <= 0.0:
             return tf.constant(0.0)
-        #return self.dirichilet_cascade_mle() # activate this for dirichilet mle
+        return self.dirichilet_cascade_mle() # activate this for dirichilet mle
 
         A = self.tree.adj_matrix  # n x n
         A = np.expand_dims(A, axis=0)  # 1 x n x n

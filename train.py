@@ -49,15 +49,16 @@ def main(_):
     step = tf.Variable(0)
 
     # LR scheduling
-    boundaries = flags.train_epochs * np.asarray([0.6, 0.8])
+    num_changes = 7
+    boundaries = flags.train_epochs * np.linspace(0.1, 0.9, num_changes-1)
     boundaries = boundaries.astype(np.int32).tolist()
 
-    lr = flags.learning_rate * np.asarray([1, 0.1, 0.01])
+    lr = flags.learning_rate * np.asarray([0.5**(i) for i in range(num_changes)])
     lr = lr.tolist()
 
     sch = keras.optimizers.schedules.PiecewiseConstantDecay(boundaries=boundaries, values=lr)
-    # optimizer = keras.optimizers.Adam()
-    optimizer = keras.optimizers.SGD(learning_rate=0.01, momentum=0.9, nesterov=True)
+    optimizer = keras.optimizers.Adam(learning_rate=lr[0])
+    #optimizer = keras.optimizers.SGD(learning_rate=0.01, momentum=0.9, nesterov=True)
 
     # Checkpointing
     ckpt = tf.train.Checkpoint(step=step, optimizer=optimizer, model=model)
