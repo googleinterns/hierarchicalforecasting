@@ -112,7 +112,7 @@ class Favorita:
 
     def train_gen(self):
         cont_len = flags.cont_len
-        all_idx = np.arange(NUM_TIME_STEPS - 2 * cont_len)
+        all_idx = np.arange(NUM_TIME_STEPS - 3 * cont_len)
 
         if flags.data_fraction < 1.0:
             start_idx = int((1 - flags.data_fraction) * NUM_TIME_STEPS)
@@ -120,22 +120,23 @@ class Favorita:
 
         perm = np.random.permutation(all_idx)
         leaves = np.where(self.tree.leaf_vector)[0]
+        idx = leaves
+        # idx = np.arange(self.num_ts)
 
         for i in perm:
-            sub_feat_cont = self.global_cont_feats[i:i+cont_len+1]
-            sub_ts = self.ts_data[i:i+cont_len+1, leaves]
-            yield sub_feat_cont, sub_ts, leaves  # t x *
+            sub_feat_cont = self.global_cont_feats[i:i+2*cont_len]
+            sub_ts = self.ts_data[i:i+2*cont_len, idx]
+            yield sub_feat_cont, sub_ts, idx  # t x *
 
     def val_gen(self):
         cont_len = flags.cont_len
-        all_idx = np.arange(NUM_TIME_STEPS - 2 * cont_len, NUM_TIME_STEPS - cont_len - 1)
+        start = NUM_TIME_STEPS - 2 * cont_len
 
-        for i in all_idx:
-            sub_feat_cont = self.global_cont_feats[i:i+cont_len+1]
-            j = np.arange(self.num_ts)
-            sub_ts = self.ts_data[i:i+cont_len+1]
-            yield sub_feat_cont, sub_ts, j  # t x *
-    
+        sub_feat_cont = self.global_cont_feats[start:]
+        j = np.arange(self.num_ts)
+        sub_ts = self.ts_data[start:]
+        yield sub_feat_cont, sub_ts, j  # t x *
+
     # def default_gen(self):
     #     cont_len = flags.cont_len
     #     tot_len = NUM_TIME_STEPS

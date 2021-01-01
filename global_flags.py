@@ -21,6 +21,7 @@ flags.DEFINE_integer('random_seed', None,
                     'The random seed to be used for TF and numpy')
 flags.DEFINE_integer('emb_seed', None,
                     'The random seed to be used only for the embeddings')
+flags.DEFINE_integer("patience", 7, "Patience for early stopping")
 
 flags.DEFINE_float('learning_rate', 0.001,
                    'Learning rate')

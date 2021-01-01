@@ -48,17 +48,17 @@ def main(_):
     step = tf.Variable(0)
 
     # LR scheduling
-    boundaries = flags.train_epochs * np.asarray([0.6, 0.8])
+    num_changes = 9
+    boundaries = flags.train_epochs * np.linspace(0.1, 0.9, num_changes-1)
     boundaries = boundaries.astype(np.int32).tolist()
 
-    lr = flags.learning_rate * np.asarray([1, 0.1, 0.01])
+    lr = flags.learning_rate * np.asarray([0.5**(i+1) for i in range(num_changes)])
     lr = lr.tolist()
 
-    sch = keras.optimizers.schedules.PiecewiseConstantDecay(
-        boundaries=boundaries, values=lr)
-    # optimizer = keras.optimizers.Adam()
-    optimizer = keras.optimizers.SGD(learning_rate=0.01, momentum=0.9,
-                                     nesterov=True)
+    sch = keras.optimizers.schedules.PiecewiseConstantDecay(boundaries=boundaries, values=lr)
+    optimizer = keras.optimizers.Adam(learning_rate=lr[0])
+    # optimizer = keras.optimizers.SGD(learning_rate=0.01, momentum=0.9,
+    #                                  nesterov=True)
 
     # Checkpointing
     ckpt = tf.train.Checkpoint(step=step, optimizer=optimizer,
@@ -79,9 +79,12 @@ def main(_):
     # summary.update(eval_dict)
     # summary.write(step=step.numpy())
 
+    best_loss = 1e7
+    pat = 0
+    best_check_path = None
     while step.numpy() < flags.train_epochs:
         ep = step.numpy()
-        print(f'Epoch {ep}')
+        print(f"Epoch {ep}")
         sys.stdout.flush()
         optimizer.learning_rate.assign(sch(step))
 
@@ -90,29 +93,37 @@ def main(_):
             loss, rmse = model.train_step(feats, y_obs, nid, optimizer)
             # sys.exit(1)
             # Train metrics
-            summary.update({
-                'train/loss': loss,
-                'train/rmse': rmse
-            })
+            summary.update({"train/loss": loss, "train/rmse": rmse})
             if i % 100 == 0:
-                mean_loss = summary.metric_dict['train/loss'].result().numpy()
-                iterator.set_description(f'Loss {mean_loss:.4f}')
+                mean_loss = summary.metric_dict["train/loss"].result().numpy()
+                iterator.set_description(f"Loss {mean_loss:.4f}")
         step.assign_add(1)
         ckpt_manager.save()
 
         # Other metrics
-        summary.update({
-            'train/learning_rate': optimizer.learning_rate.numpy()
-        })
-        
+        summary.update({"train/learning_rate": optimizer.learning_rate.numpy()})
+
         # Test metrics
         eval_dict = model.eval(data.tf_dataset(train=False), data.tree.levels)
         print(eval_dict)
+        eval_loss = eval_dict[f"test/rmse@{2}"]
+        if eval_loss < best_loss:
+            best_loss = eval_loss
+            best_check_path = ckpt_manager.latest_checkpoint
+            pat = 0
+            print("saved best model so far...")
+        else:
+            pat += 1
+            if pat > flags.patience:
+                print("early stopped with best loss: {}".format(best_loss))
+                print("best model at: {}".format(best_check_path))
+                break
+
         summary.update(eval_dict)
         summary.write(step=step.numpy())
 
-        eval_save_path = os.path.join(expt_dir, 'eval.pkl')
-        with open(eval_save_path, 'wb') as fout:
+        eval_save_path = os.path.join(expt_dir, "eval.pkl")
+        with open(eval_save_path, "wb") as fout:
             pickle.dump(eval_dict, fout)
     
     # emb = model.get_node_emb(np.arange(data.num_ts))

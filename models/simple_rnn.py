@@ -186,10 +186,18 @@ class FixedRNN(keras.Model):
         return_dict = {f'test/rmse@{d}':[] for d in level_dict}
 
         for feats, y_obs, nid in dataset:
-            assert(y_obs.numpy().shape[0] == cont_len + 1)
-            assert(feats.numpy().shape[0] == cont_len + 1)
+            assert(y_obs.numpy().shape[0] == 2 * cont_len)
+            assert(feats.numpy().shape[0] == 2 * cont_len)
 
             pred = self(feats, y_obs[:flags.cont_len], nid)  # t x 1
+
+            '''Code for computing higher level predictions using only leaf level predictions'''
+            # leaf_mat = self.tree.leaf_matrix.T
+            # num_leaf = np.sum(leaf_mat, axis=0, keepdims=True)
+            # leaf_mat = leaf_mat / num_leaf
+            # pred = pred @ leaf_mat
+
+            # pred = sanity_check_baseline(y_obs[:flags.cont_len])  # Uncomment here to run the baseline
             mae = tf.abs(pred - y_obs[flags.cont_len:])  # t x 1
             mae = mae.numpy().ravel()
 
@@ -207,3 +215,9 @@ class FixedRNN(keras.Model):
 
         # np.save('notebooks/evals.npy', y_pred)
         return return_dict
+
+def sanity_check_baseline(y_obs):
+    last_obs = y_obs.numpy()[-1].reshape((1, -1))  # 1 x n
+    t = last_obs.shape[0]
+    pred = np.repeat(last_obs, t, axis=0)
+    return pred
