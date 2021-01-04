@@ -24,83 +24,93 @@ class Favorita:
     def gen_data(self):
         global NUM_TIME_STEPS
 
-        '''
-        From https://stats.stackexchange.com/questions/125946/generate-a-time-series-comprising-seasonal-trend-and-remainder-components-in-r
-        '''
-        TS = []
-        d = flags.node_emb_dim
-        T = 1000
-        p = 10
-        for i in range(d):
-            gammas = [np.random.randn() for i in range(p)]
-            mu = 0
-            beta = 0
+        try:
+            with open('synthetic_data.pkl', 'rb') as fin:
+                print('Loading generated synthetic data ...')
+                self.tree, self.ts_data, self.global_cont_feats = \
+                    pickle.load(fin)
+                self.num_ts = self.tree.num_nodes
+        except FileNotFoundError:
+            '''
+            From https://stats.stackexchange.com/questions/125946/generate-a-time-series-comprising-seasonal-trend-and-remainder-components-in-r
+            '''
+            TS = []
+            d = flags.node_emb_dim
+            T = 1000
+            p = 10
+            for i in range(d):
+                gammas = [np.random.randn() for i in range(p)]
+                mu = 0
+                beta = 0
 
-            ts = []
-            for j in range(T):
-                gamma = -np.sum(gammas[-p+1:]) + np.random.randn() * 0.1
-                gammas.append(gamma)
-                mu = mu + beta + np.random.randn() * 0.1
-                beta += np.random.randn() * 0.0001
+                ts = []
+                for j in range(T):
+                    gamma = -np.sum(gammas[-p+1:]) + np.random.randn() * 0.1
+                    gammas.append(gamma)
+                    mu = mu + beta + np.random.randn() * 0.1
+                    beta += np.random.randn() * 0.0001
 
-                y = mu + gamma + np.random.randn() * 0.1
-                ts.append(y)
+                    y = mu + gamma + np.random.randn() * 0.1
+                    ts.append(y)
+                
+                TS.append(ts)
+
+            TS = np.array(TS).T
             
-            TS.append(ts)
+            n_1 = 10
+            n_2 = 10
 
-        TS = np.array(TS).T
-        
-        n_1 = 10
-        n_2 = 10
+            # root_node = np.random.randn(1, d) * 0.1
+            # middle_nodes = root_node + np.random.randn(n_1, d) * 0.1
+            # reps = np.repeat(middle_nodes, n_2, axis=0)
+            # leaf_nodes = reps + np.random.randn(n_1 * n_2, d) * 0.03
 
-        # root_node = np.random.randn(1, d) * 0.1
-        # middle_nodes = root_node + np.random.randn(n_1, d) * 0.1
-        # reps = np.repeat(middle_nodes, n_2, axis=0)
-        # leaf_nodes = reps + np.random.randn(n_1 * n_2, d) * 0.03
+            root_node = [np.random.dirichlet(np.ones(d) / d * 10)]
+            middle_nodes = []
+            leaf_nodes = []
 
-        root_node = [np.random.dirichlet(np.ones(d) / d * 10)]
-        middle_nodes = []
-        leaf_nodes = []
+            for i in range(n_1):
+                middle_node = np.random.dirichlet(root_node[0] * 7)
+                middle_nodes.append(middle_node)
+                for j in range(n_2):
+                    leaf_node = np.random.dirichlet(middle_node * 3)
+                    leaf_nodes.append(leaf_node)
 
-        for i in range(n_1):
-            middle_node = np.random.dirichlet(root_node[0] * 7)
-            middle_nodes.append(middle_node)
-            for j in range(n_2):
-                leaf_node = np.random.dirichlet(middle_node * 3)
-                leaf_nodes.append(leaf_node)
+            all_nodes = np.concatenate([root_node, middle_nodes, leaf_nodes])
 
-        all_nodes = np.concatenate([root_node, middle_nodes, leaf_nodes])
+            node_strs = ['r']
+            for i in range(n_1):
+                node_strs.append(f'{i}')
+            
+            for i in range(n_1):
+                for j in range(n_2):
+                    node_strs.append(f'{i}_{j}')
+            
+            assert(len(node_strs) == all_nodes.shape[0])
 
-        node_strs = ['r']
-        for i in range(n_1):
-            node_strs.append(f'{i}')
-        
-        for i in range(n_1):
-            for j in range(n_2):
-                node_strs.append(f'{i}_{j}')
-        
-        assert(len(node_strs) == all_nodes.shape[0])
+            self.tree = Tree()
+            for nid in node_strs[1:]:  # excluding the root node
+                self.tree.insert_seq(nid)
+            self.tree.precompute()
 
-        self.tree = Tree()
-        for nid in node_strs[1:]:  # excluding the root node
-            self.tree.insert_seq(nid)
-        self.tree.precompute()
+            self.num_ts = self.tree.num_nodes
+            print('NUM TS', self.num_ts)
+            
+            perm = [None for _ in node_strs]
+            for i, node_str in enumerate(node_strs):
+                nid = self.tree.node_id[node_str]
+                assert(nid is not None)
+                perm[nid] = i
+            
+            perm_nodes = all_nodes[perm]
 
-        self.num_ts = self.tree.num_nodes
-        print('NUM TS', self.num_ts)
-        
-        perm = [None for _ in node_strs]
-        for i, node_str in enumerate(node_strs):
-            nid = self.tree.node_id[node_str]
-            assert(nid is not None)
-            perm[nid] = i
-        
-        perm_nodes = all_nodes[perm]
+            self.ts_data = TS @ perm_nodes.T
+            print(self.ts_data.shape)
+            self.global_cont_feats = np.asarray([i % p for i in range(NUM_TIME_STEPS)])
+            self.global_cont_feats = self.global_cont_feats.reshape((-1, 1))
 
-        self.ts_data = TS @ perm_nodes.T
-        print(self.ts_data.shape)
-        self.global_cont_feats = np.asarray([i % p for i in range(NUM_TIME_STEPS)])
-        self.global_cont_feats = self.global_cont_feats.reshape((-1, 1))
+            with open('synthetic_data.pkl', 'wb') as fout:
+                pickle.dump((self.tree, self.ts_data, self.global_cont_feats), fout)
     
     def compute_weights(self):
         levels = self.tree.levels
