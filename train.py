@@ -3,6 +3,7 @@ import sys
 import tensorflow as tf
 import numpy as np
 import pickle
+import random
 
 import global_flags
 import data_loader
@@ -15,7 +16,16 @@ from tqdm import tqdm
 flags = global_flags.FLAGS
 
 def main(_):
+    gpus = tf.config.experimental.list_physical_devices('GPU')
+    if gpus:
+        try:
+            for gpu in gpus:
+                tf.config.experimental.set_memory_growth(gpu, True)
+        except RuntimeError as e:
+            print(e)
+    
     tf.random.set_seed(flags.random_seed)
+    random.seed(flags.random_seed)
     np.random.seed(flags.random_seed)
     
     print('FLAGS:')
@@ -42,7 +52,7 @@ def main(_):
     model_name = flags.model
     if flags.hierarchy is not None:
         model_name += '_' + flags.hierarchy
-    expt_dir = os.path.join('./logs',
+    expt_dir = os.path.join('./logs2',
         flags.dataset, model_name, flags.expt)
 
     step = tf.Variable(0)

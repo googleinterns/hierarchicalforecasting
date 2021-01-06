@@ -19,10 +19,13 @@ class FixedRNN(keras.Model):
         
         self.tree = tree
         # assert(flags.node_emb_dim == flags.fixed_lstm_hidden)
-        self.node_emb = layers.Embedding(input_dim=self.num_ts,
-            output_dim=flags.node_emb_dim, name='node_embed',
-            embeddings_initializer=keras.initializers.RandomUniform(
-                seed=flags.emb_seed))
+        self.node_emb = tf.Variable(
+            np.random.uniform(size=[self.num_ts, flags.node_emb_dim]).astype(np.float32),
+        )
+        print("Node embs dim: {}".format(flags.node_emb_dim))
+        self.var_params = tf.Variable(
+            np.ones(shape=[1, self.num_ts]).astype(np.float32)
+        )  # variance parameters for the dirichilet distributions in the cascade
 
         self.encoders = []
         self.decoders = []
@@ -45,8 +48,9 @@ class FixedRNN(keras.Model):
         #         name='output_scale')
 
     def get_normalized_emb(self):
-        self.node_emb(np.asarray([0], dtype=np.int32))  # creates the emb matrix
-        embs = tf.abs(self.node_emb.trainable_variables[0])
+        # self.node_emb(np.asarray([0], dtype=np.int32))  # creates the emb matrix
+        #embs = tf.abs(self.node_emb)
+        embs = tf.nn.softmax(self.node_emb, axis=1)
         embs = embs / tf.reduce_sum(embs, axis=1, keepdims=True)
         return embs
     
@@ -135,16 +139,49 @@ class FixedRNN(keras.Model):
         A = self.tree.adj_matrix  # n x n
         A = np.expand_dims(A, axis=0)  # 1 x n x n
 
+        if flags.l2_reg_weight <= 0.0:
+            return tf.constant(0.0)
+        # return self.dirichilet_cascade_mle() # activate for dirichilet cascade
+
         embs = self.get_normalized_emb()  # n x e
         embs = tf.transpose(embs)  # e x n
         emb_1 = tf.expand_dims(embs, axis=-1)  # e x n x 1
         emb_2 = tf.expand_dims(embs, axis=-2)  # e x 1 x n
         
         edge_diff = emb_1 * A - emb_2 * A
-        edge_diff = edge_diff * edge_diff  ## Change here for L1/L2 regularization
+        edge_diff = tf.square(edge_diff)  ## Change here for L1/L2 regularization
         reg = flags.l2_reg_weight * tf.reduce_mean(edge_diff)
 
         return reg
+
+    def dirichilet_cascade_mle(self):
+        """Implement dirichilet cascade mle.
+        """
+        A = self.tree.adj_matrix  # n x n
+        A = np.expand_dims(A, axis=0)  # 1 x n x n
+
+        embs = self.get_normalized_emb()  # n x e
+        embs = tf.transpose(embs)  # e x n
+        emb_1 = tf.expand_dims(embs, axis=-1)  # e x n x 1
+        var_params = tf.expand_dims(self.var_params, axis=-1)  # 1 x n x 1
+        emb_1 = emb_1 * var_params  # e x n x 1
+        emb_2 = tf.expand_dims(embs, axis=-2)  # e x 1 x n
+        second_arg = emb_2 * A
+        second_arg = tf.where(tf.equal(second_arg, 0), tf.ones_like(second_arg), second_arg)
+        neg_mle = (emb_1 * A - 1.0) * tf.math.log(second_arg)  # e x n x n
+        neg_mle = tf.reduce_sum(neg_mle, axis=0)  # n x n
+
+        b_alpha = emb_1 * A
+        b_alpha = tf.where(tf.equal(b_alpha, 0), tf.ones_like(b_alpha), b_alpha)
+        b_alpha_1 = tf.reduce_sum(tf.math.lgamma(b_alpha), axis=0)
+
+        b_alpha = emb_1 * A
+        b_alpha = tf.reduce_sum(b_alpha, axis=0)
+        b_alpha = tf.where(tf.equal(b_alpha, 0), tf.ones_like(b_alpha), b_alpha)
+        b_alpha_2 = tf.math.lgamma(b_alpha)
+
+        total_loss = b_alpha_1 - b_alpha_2 - neg_mle
+        return flags.l2_reg_weight * tf.reduce_mean(total_loss)
 
     @tf.function
     def call(self, feats, y_prev, nid):
@@ -184,6 +221,8 @@ class FixedRNN(keras.Model):
     def eval(self, dataset, level_dict):
         cont_len = flags.cont_len
         return_dict = {f'test/rmse@{d}':[] for d in level_dict}
+        for d in level_dict:
+            return_dict[f'test/rmse_re@{d}'] = []
 
         for feats, y_obs, nid in dataset:
             assert(y_obs.numpy().shape[0] == 2 * cont_len)
@@ -192,26 +231,29 @@ class FixedRNN(keras.Model):
             pred = self(feats, y_obs[:flags.cont_len], nid)  # t x 1
 
             '''Code for computing higher level predictions using only leaf level predictions'''
-            # leaf_mat = self.tree.leaf_matrix.T
-            # num_leaf = np.sum(leaf_mat, axis=0, keepdims=True)
-            # leaf_mat = leaf_mat / num_leaf
-            # pred = pred @ leaf_mat
+            leaf_mat = self.tree.leaf_matrix.T
+            num_leaf = np.sum(leaf_mat, axis=0, keepdims=True)
+            leaf_mat = leaf_mat / num_leaf
+            re_pred = pred @ leaf_mat
 
             # pred = sanity_check_baseline(y_obs[:flags.cont_len])  # Uncomment here to run the baseline
             mae = tf.abs(pred - y_obs[flags.cont_len:])  # t x 1
             mae = mae.numpy().ravel()
 
+            re_mae = tf.abs(re_pred - y_obs[flags.cont_len:])
+            re_mae = re_mae.numpy().ravel()
+
             for d in level_dict:
                 sub_mean = np.mean(mae[level_dict[d]])
+                re_sub_mean = np.mean(re_mae[level_dict[d]])
                 return_dict[f'test/rmse@{d}'].append(sub_mean)
+                return_dict[f'test/rmse_re@{d}'].append(re_sub_mean)
 
         rmses = []
         for key in return_dict:
             mean = np.mean(return_dict[key])
             rmses.append(mean)
             return_dict[key] = mean
-
-        return_dict['test/rmse'] = np.mean(rmses)
 
         # np.save('notebooks/evals.npy', y_pred)
         return return_dict

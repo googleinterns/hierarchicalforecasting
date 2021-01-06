@@ -5,6 +5,10 @@ flags.DEFINE_string('dataset', 'syn', 'The name of the experiment dir')
 flags.DEFINE_string('model', 'fixed', 'The name of the experiment dir')
 flags.DEFINE_string('favorita_dir', './data/favorita', 'Path to the m5 data directory')
 flags.DEFINE_string('hierarchy', None, 'Type of hierarchy information to use')
+flags.DEFINE_string('base_data_path', None, 'Path to base time-series numpy file')
+flags.DEFINE_string('mixture_path', None, 'Path to base numpy mixture file')
+flags.DEFINE_string('data_path', None, 'Path to base numpy mixture file')
+
 
 flags.DEFINE_integer('train_epochs', 25, 'Number of epochs to train')
 flags.DEFINE_integer('batch_size', None, 'Batch size for the randomly sampled batch')
@@ -41,4 +45,6 @@ flags.DEFINE_boolean('emb_as_inp', False,
                      'Whether to provide node embeddings as input')
 flags.DEFINE_boolean('load_alternate', False,
                      'Whether to load the alternate TS data')
+flags.DEFINE_boolean('internal_nodes', False,
+                     'Whether to have internal nodes in the training dataset')
 FLAGS = flags.FLAGS
