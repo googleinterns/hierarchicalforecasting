@@ -24,7 +24,7 @@ def main(_):
 
     # Load data
     if flags.dataset == 'syn':
-        data = data_loader.Favorita()
+        data = data_loader.SynData()
     else:
         raise ValueError(f'Unknown dataset {flags.dataset}')
 

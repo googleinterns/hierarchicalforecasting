@@ -39,6 +39,6 @@ flags.DEFINE_boolean('output_scaling', False,
                      'Learning output scale parameters')
 flags.DEFINE_boolean('emb_as_inp', False,
                      'Whether to provide node embeddings as input')
-flags.DEFINE_boolean('load_alternate', False,
-                     'Whether to load the alternate TS data')
+flags.DEFINE_boolean('reconcile', False,
+                     'Whether to train on the reconciled dataset')
 FLAGS = flags.FLAGS

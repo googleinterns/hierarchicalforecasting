@@ -213,7 +213,7 @@ class FixedRNN(keras.Model):
 
         return_dict['test/rmse'] = np.mean(rmses)
 
-        # np.save('notebooks/evals.npy', y_pred)
+        # np.save('notebooks/evals.npy', pred.numpy())
         return return_dict
 
 def sanity_check_baseline(y_obs):

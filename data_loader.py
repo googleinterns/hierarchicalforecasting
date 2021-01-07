@@ -1,6 +1,7 @@
 import numpy as np
 import pandas as pd
 import os
+import sys
 import pickle
 import tensorflow as tf
 import global_flags
@@ -16,7 +17,7 @@ flags = global_flags.FLAGS
 NUM_TIME_STEPS = 1000
 
 
-class Favorita:
+class SynData:
     def __init__(self):
         self.gen_data()
         self.compute_weights()
@@ -111,7 +112,14 @@ class Favorita:
 
             with open('synthetic_data.pkl', 'wb') as fout:
                 pickle.dump((self.tree, self.ts_data, self.global_cont_feats), fout)
-    
+
+        '''Reconciliation code'''
+        if flags.reconcile:
+            leaf_mat = self.tree.leaf_matrix.T
+            num_leaf = np.sum(leaf_mat, axis=0, keepdims=True)
+            leaf_mat = leaf_mat / num_leaf
+            self.ts_data = self.ts_data @ leaf_mat
+
     def compute_weights(self):
         levels = self.tree.levels
         self.w = np.ones(self.num_ts)
@@ -303,8 +311,7 @@ def main(_):
     # print(tree.adj_matrix)
     # print(tree.ancestor_matrix)
 
-    data = Favorita()
-    print(data.ts_data.dtype, data.ts_data.shape)
+    data = SynData()
 
     # dataset = data.tf_dataset(True)
     # for d in dataset:
