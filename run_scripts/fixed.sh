@@ -5,7 +5,9 @@ do
     echo
     echo "RUN ${i}"
     echo
-    python train.py \
-    --expt=trans_no_scaling_sgd/run_${i} --model=fixed \
-    --batch_size=500 --train_epochs=25 --learning_rate=0.01
+    CUDA_VISIBLE_DEVICES="3" python train.py \
+    --expt=run_${i} --model=fixed --random_seed=${i} \
+    --batch_size=500 --train_epochs=100 --patience=10 --learning_rate=0.01 \
+    --reg_type='l1' --reg_weight=0.01
+    break  # Comment when running multiple expts
 done

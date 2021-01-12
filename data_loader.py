@@ -12,18 +12,13 @@ from sklearn.preprocessing import OrdinalEncoder, minmax_scale
 flags = global_flags.FLAGS
 
 NUM_TIME_STEPS = 1941 - 28  # Offsetting by 28 # Starts from 1
-START_IDX = 1000
+START_IDX = 1
 
 class M5Data:
     def __init__(self):
         self.read_data()
-        self.compute_weights()
-        if flags.model == 'fixed':
-            self.variation_scaling_A()
-        elif flags.model == 'random':
-            self.variation_scaling_B()
-        else:
-            raise ValueError(f'Unknown model {flags.model}')
+        self.mean_scaling()
+        # self.compute_weights()
 
     def read_data(self):
         data_path = os.path.join(flags.m5dir, 'sales_train_evaluation.csv')
@@ -93,7 +88,7 @@ class M5Data:
         assert(np.abs(np.sum(self.w) - 1.0) <= 1e-5)
 
     def mean_scaling(self):
-        self.abs_means = np.mean(np.abs(self.ts_data), axis=0).reshape((1, -1))
+        self.abs_means = np.mean(np.abs(self.ts_data), axis=0, keepdims=True)
         self.ts_data = self.ts_data / self.abs_means
     
     def variation_scaling_A(self):
@@ -108,29 +103,30 @@ class M5Data:
         self.ts_data = self.ts_data / self.variations
 
     def train_gen(self):
-        pred_hor = flags.pred_hor
+        cont_len = flags.cont_len
         tot_len = NUM_TIME_STEPS
 
-        num_data = tot_len - 3 * pred_hor
+        num_data = tot_len - 3 * cont_len
         perm = np.random.permutation(num_data)
 
-        weights = self.w * (self.num_ts / flags.batch_size)
+        # weights = self.w * (self.num_ts / flags.batch_size)
 
         for i in perm:
-            sub_feat_cont = self.global_cont_feats[i:i+2*pred_hor]
+            sub_feat_cont = self.global_cont_feats[i:i+2*cont_len]
             sub_feat_cat = tuple(
-                feat[i:i+2*pred_hor] for feat in self.global_cat_feats
+                feat[i:i+2*cont_len] for feat in self.global_cat_feats
             )
             # j = np.random.choice(range(self.num_ts), size=flags.batch_size, replace=False)
-            j = np.random.choice(range(self.num_ts), size=flags.batch_size, p=self.w)
+            # j = np.random.choice(range(self.num_ts), size=flags.batch_size, p=self.w)
+            j = np.random.choice(range(self.num_ts), size=flags.batch_size)
             # j = np.random.permutation(3060)
-            sub_ts = self.ts_data[i:i+2*pred_hor, j]
+            sub_ts = self.ts_data[i:i+2*cont_len, j]
             yield (sub_feat_cont, sub_feat_cat), sub_ts, j  # t x *
         
     def val_gen(self):
-        pred_hor = flags.pred_hor
+        cont_len = flags.cont_len
         tot_len = NUM_TIME_STEPS
-        start_idx = tot_len - 2 * pred_hor
+        start_idx = tot_len - 2 * cont_len
         sub_ts = self.ts_data[start_idx:tot_len]
         sub_feat_cont = self.global_cont_feats[start_idx:tot_len]
         sub_feat_cat = tuple(
