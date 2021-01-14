@@ -7,7 +7,7 @@ import global_flags
 
 from absl import app
 from tqdm import tqdm
-from sklearn.preprocessing import OrdinalEncoder, minmax_scale
+from sklearn.preprocessing import OrdinalEncoder, minmax_scale, StandardScaler
 
 flags = global_flags.FLAGS
 
@@ -17,7 +17,7 @@ START_IDX = 1
 class M5Data:
     def __init__(self):
         self.read_data()
-        self.mean_scaling()
+        self.transform_data()
         # self.compute_weights()
 
     def read_data(self):
@@ -87,9 +87,15 @@ class M5Data:
         self.w /= len(levels)
         assert(np.abs(np.sum(self.w) - 1.0) <= 1e-5)
 
-    def mean_scaling(self):
-        self.abs_means = np.mean(np.abs(self.ts_data), axis=0, keepdims=True)
-        self.ts_data = self.ts_data / self.abs_means
+    def transform_data(self):
+        self.transformer = StandardScaler()
+        self.ts_data = self.transformer.fit_transform(self.ts_data)
+        # self.abs_means = np.mean(np.abs(self.ts_data), axis=0, keepdims=True)
+        # self.ts_data = self.ts_data / self.abs_means
+    
+    def inverse_transform(self, pred):
+        inv_trans = self.transformer.inverse_transform(pred)
+        return inv_trans
     
     def variation_scaling_A(self):
         self.variations = self.ts_data[1:] - self.ts_data[:-1]

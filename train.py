@@ -75,7 +75,8 @@ def main(_):
     
     summary = Summary(expt_dir)
 
-    # eval_dict = model.eval(data.tf_dataset(train=False), data.tree.levels)
+    eval_df, test_loss = model.eval(data)
+    # sys.exit()
     # print(eval_dict)
     # summary.update(eval_dict)
     # summary.write(step=step.numpy())
@@ -105,11 +106,10 @@ def main(_):
         summary.update({"train/learning_rate": optimizer.learning_rate.numpy()})
 
         '''Test metrics'''
-        eval_dict = model.eval(data.tf_dataset(train=False), data.tree.levels)
-        print(eval_dict)
-        eval_loss = eval_dict[f"test/mean_mae"]
-        if eval_loss < best_loss:
-            best_loss = eval_loss
+        eval_df, test_loss = model.eval(data)
+
+        if test_loss < best_loss:
+            best_loss = test_loss
             best_check_path = ckpt_manager.latest_checkpoint
             pat = 0
             print("saved best model so far...")
@@ -120,12 +120,12 @@ def main(_):
                 print("best model at: {}".format(best_check_path))
                 break
 
-        summary.update(eval_dict)
+        # summary.update(eval_dict)
         summary.write(step=step.numpy())
 
         eval_save_path = os.path.join(expt_dir, "eval.pkl")
         with open(eval_save_path, "wb") as fout:
-            pickle.dump(eval_dict, fout)
+            pickle.dump(eval_df, fout)
 
     '''Save embeddings to file'''
     # emb = model.get_node_emb(np.arange(data.num_ts))

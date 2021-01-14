@@ -2,6 +2,8 @@ import tensorflow as tf
 import numpy as np
 import global_flags
 import sys
+import pandas as pd
+from tabulate import tabulate
 
 from tensorflow import keras
 from tensorflow.keras import layers
@@ -9,6 +11,7 @@ from tensorflow.keras import layers
 
 flags = global_flags.FLAGS
 MAX_FEAT_EMB_DIM = 50
+EPS = 1e-7
 
 
 class FixedRNN(keras.Model):
@@ -162,27 +165,80 @@ class FixedRNN(keras.Model):
 
         return loss, mae
 
-    def eval(self, dataset, level_dict):
+    def eval(self, data):
+        iterator = data.tf_dataset(train=False)
+        level_dict = data.tree.levels
         cont_len = flags.cont_len
 
-        for feats, y_obs, nid in dataset:
+        for feats, y_obs, nid in iterator:
             assert(y_obs.numpy().shape[0] == 2 * cont_len)
             assert(feats[0].numpy().shape[0] == 2 * cont_len)
 
             y_pred = self(feats, y_obs[:cont_len], nid)
-            mae = tf.abs(y_pred - y_obs[flags.cont_len:])  # t x 1
-            mae = tf.reduce_mean(mae, axis=0)
-            mae = mae.numpy()
+            test_loss = tf.abs(y_pred - y_obs[flags.cont_len:])  # t x 1
+            test_loss = tf.reduce_mean(test_loss).numpy()
 
-            return_dict = {}
-            maes = []
+            y_pred = data.inverse_transform(y_pred.numpy())
+
+            y_true = y_obs[flags.cont_len:].numpy()
+            y_true = data.inverse_transform(y_true)
+
+            results_list = []
+
+            '''Compute metrics for all time series together'''
+            results_dict = {}
+            results_dict['level'] = 'all'
+            for metric in metrics:
+                eval_fn = metrics[metric]
+                results_dict[metric] = eval_fn(y_pred, y_true)
+            results_list.append(results_dict)
+
+            '''Compute metrics for individual levels and their mean across levels'''
+            mean_dict = {metric: [] for metric in metrics}
+
             for d in level_dict:
-                sub_mean = np.mean(mae[level_dict[d]])
-                maes.append(sub_mean)
-                return_dict[f'test/mae@{d}'] = sub_mean
-
-            return_dict['test/weighted_mae'] = np.mean(maes)
-            return_dict['test/mean_mae'] = np.mean(mae)
-
+                results_dict = {}
+                sub_pred = y_pred[:, level_dict[d]]
+                sub_true = y_true[:, level_dict[d]]
+                for metric in metrics:
+                    eval_fn = metrics[metric]
+                    eval_val = eval_fn(sub_pred, sub_true)
+                    results_dict[metric] = eval_val
+                    mean_dict[metric].append(eval_val)
+                results_dict['level'] = d
+                results_list.append(results_dict)
+            
+            '''Compute the mean result of all the levels'''
+            for d in mean_dict:
+                mean_dict[d] = np.mean(mean_dict[d])
+            mean_dict['level'] = 'mean'
+            results_list.append(mean_dict)
+            
+            df = pd.DataFrame(data=results_list)
+            # df.set_index('level')
+            print(tabulate(df, showindex=False, headers='keys', tablefmt='psql'))
+            print(f'Test loss: {test_loss}')
         # np.save('notebooks/evals.npy', y_pred)
-        return return_dict
+        return df, test_loss
+
+
+def mape(y_pred, y_true):
+    abs_diff = np.abs(y_pred - y_true)
+    abs_val = np.abs(y_true)
+    mape = np.mean(abs_diff/(abs_val + EPS))
+    return mape
+
+def wape(y_pred, y_true):
+    abs_diff = np.abs(y_pred - y_true)
+    abs_val = np.abs(y_true)
+    wape = np.sum(abs_diff)/(np.sum(abs_val) + EPS)
+    return wape
+
+def smape(y_pred, y_true):
+    abs_diff = np.abs(y_pred - y_true)
+    abs_mean = (np.abs(y_true) + np.abs(y_pred)) / 2
+    smape = np.mean(abs_diff/(abs_mean + EPS))
+    return smape
+
+
+metrics = {'mape': mape, 'wape': wape, 'smape': smape}
