@@ -112,7 +112,12 @@ def main(_):
             best_loss = test_loss
             best_check_path = ckpt_manager.latest_checkpoint
             pat = 0
-            print("saved best model so far...")
+
+            eval_save_path = os.path.join(expt_dir, "eval.pkl")
+            with open(eval_save_path, "wb") as fout:
+                pickle.dump(eval_df, fout)
+
+            print("saved best result so far...")
         else:
             pat += 1
             if pat > flags.patience:
@@ -122,10 +127,6 @@ def main(_):
 
         # summary.update(eval_dict)
         summary.write(step=step.numpy())
-
-        eval_save_path = os.path.join(expt_dir, "eval.pkl")
-        with open(eval_save_path, "wb") as fout:
-            pickle.dump(eval_df, fout)
 
     '''Save embeddings to file'''
     # emb = model.get_node_emb(np.arange(data.num_ts))

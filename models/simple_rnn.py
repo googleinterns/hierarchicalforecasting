@@ -215,7 +215,7 @@ class FixedRNN(keras.Model):
             results_list.append(mean_dict)
             
             df = pd.DataFrame(data=results_list)
-            # df.set_index('level')
+            df.set_index('level', inplace=True)
             print(tabulate(df, showindex=False, headers='keys', tablefmt='psql'))
             print(f'Test loss: {test_loss}')
         # np.save('notebooks/evals.npy', y_pred)

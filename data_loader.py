@@ -90,23 +90,10 @@ class M5Data:
     def transform_data(self):
         self.transformer = StandardScaler()
         self.ts_data = self.transformer.fit_transform(self.ts_data)
-        # self.abs_means = np.mean(np.abs(self.ts_data), axis=0, keepdims=True)
-        # self.ts_data = self.ts_data / self.abs_means
     
     def inverse_transform(self, pred):
         inv_trans = self.transformer.inverse_transform(pred)
         return inv_trans
-    
-    def variation_scaling_A(self):
-        self.variations = self.ts_data[1:] - self.ts_data[:-1]
-        self.variations = np.mean(self.variations**2, axis=0)
-        self.variations = np.sqrt(self.variations).reshape((1, -1))
-        self.ts_data = self.ts_data / self.variations
-    
-    def variation_scaling_B(self):
-        self.variations = np.abs(self.ts_data[1:] - self.ts_data[:-1])
-        self.variations = np.mean(self.variations, axis=0).reshape((1, -1))
-        self.ts_data = self.ts_data / self.variations
 
     def train_gen(self):
         cont_len = flags.cont_len
