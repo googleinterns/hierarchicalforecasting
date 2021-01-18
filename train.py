@@ -77,7 +77,7 @@ def main(_):
 
     eval_df, test_loss = model.eval(data)
     # sys.exit()
-    # print(eval_dict)
+    # print(eval_df.loc['mean']['wape'])
     # summary.update(eval_dict)
     # summary.write(step=step.numpy())
 
@@ -108,8 +108,9 @@ def main(_):
         '''Test metrics'''
         eval_df, test_loss = model.eval(data)
 
-        if test_loss < best_loss:
-            best_loss = test_loss
+        tracked_loss = eval_df.loc['mean']['wape']
+        if tracked_loss < best_loss:
+            best_loss = tracked_loss
             best_check_path = ckpt_manager.latest_checkpoint
             pat = 0
 

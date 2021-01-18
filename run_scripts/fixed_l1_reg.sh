@@ -7,7 +7,7 @@ do
     echo
     CUDA_VISIBLE_DEVICES="3" python train.py \
     --expt=run_${i} --model=fixed --random_seed=${i} \
-    --batch_size=500 --train_epochs=25 --patience=10 --learning_rate=0.01 \
+    --batch_size=500 --train_epochs=25 --patience=5 --learning_rate=0.01 \
     --reg_type='l1' --reg_weight=1.0
     # break  # Comment when running multiple expts
 done
