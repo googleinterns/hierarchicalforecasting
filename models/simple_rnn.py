@@ -23,6 +23,8 @@ class FixedRNN(keras.Model):
         
         self.tree = tree
 
+        assert(flags.fixed_lstm_hidden == flags.node_emb_dim)
+
         self.node_emb = tf.Variable(
             np.random.uniform(size=[self.num_ts, flags.node_emb_dim]).astype(np.float32),
             name='node_emb'
@@ -33,28 +35,13 @@ class FixedRNN(keras.Model):
             for dim in self.cat_dims
         ]
 
-        self.encoders = []
-        self.decoders = []
-        self.output_layers = []
-
-        for i in range(flags.node_emb_dim):
-            encoder = layers.LSTM(flags.fixed_lstm_hidden,
+        self.encoder = layers.LSTM(flags.fixed_lstm_hidden,
                                 return_state=True, time_major=True)
-            decoder = layers.LSTM(flags.fixed_lstm_hidden,
+        self.decoder = layers.LSTM(flags.fixed_lstm_hidden,
                                 return_sequences=True, time_major=True)
-            self.encoders.append(encoder)
-            self.decoders.append(decoder)
-        
-            output_layer = layers.Dense(1, use_bias=False)
-            self.output_layers.append(output_layer)
-    
-    def get_normalized_emb(self):
-        embs = tf.abs(self.node_emb)
-        embs = embs / tf.reduce_sum(embs, axis=1, keepdims=True)
-        return embs
     
     def get_node_emb(self, nid):
-        embs = self.get_normalized_emb()
+        embs = self.node_emb
         node_emb = tf.nn.embedding_lookup(embs, nid)
         return node_emb
 
@@ -81,21 +68,12 @@ class FixedRNN(keras.Model):
 
         enc_inp = tf.concat([y_prev, feats_prev], axis=-1)  # t/2 x b x D'
 
-        if flags.node_emb_dim == 1:
-            loadings = 1.0
-        else:
-            loadings = tf.expand_dims(node_emb, 0)  # 1 x b x h
+        loadings = tf.expand_dims(node_emb, 0)  # 1 x b x h
 
-        outputs = []
-        for e, d, o in zip(self.encoders, self.decoders, self.output_layers):
-            _, h, c = e(inputs=enc_inp)  # b x h
-            output = d(inputs=feats_futr, initial_state=(h, c))  # t x b x h
-            output = o(output)  # t x b x 1
-            outputs.append(output)
+        _, h, c = self.encoder(inputs=enc_inp)  # b x h
+        output = self.decoder(inputs=feats_futr, initial_state=(h, c))  # t x b x h
 
-        outputs = tf.concat(outputs, axis=-1)  # t x b x h
-
-        fixed_effect = tf.reduce_sum(outputs * loadings, axis=-1)  # t x b
+        fixed_effect = tf.reduce_sum(output * loadings, axis=-1)  # t x b
         return fixed_effect
 
     def l_p_norm_reg(self, p):
@@ -159,6 +137,8 @@ class FixedRNN(keras.Model):
 
         grads = tape.gradient(loss, self.trainable_variables)
         optimizer.apply_gradients(zip(grads, self.trainable_variables))
+
+        print('# Parameters in model ', np.sum([np.prod(v.shape) for v in self.trainable_variables]))
 
         # print(self.trainable_variables)
         # for v in self.trainable_variables:

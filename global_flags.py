@@ -2,7 +2,7 @@ from absl import flags
 
 flags.DEFINE_string('expt', None, 'The name of the experiment dir')
 flags.DEFINE_string('dataset', 'm5', 'The name of the experiment dir')
-flags.DEFINE_string('model', 'fixed', 'The name of the experiment dir')
+flags.DEFINE_string('model', 'fixed_df', 'The name of the experiment dir')
 flags.DEFINE_string('m5dir', './data/m5', 'Path to the m5 data directory')
 flags.DEFINE_string('reg_type', None, 'Type of hierarchy information to use')
 

@@ -29,7 +29,7 @@ def main(_):
         raise ValueError(f'Unknown dataset {flags.dataset}')
 
     '''Create model'''
-    if flags.model == 'fixed':
+    if flags.model == 'fixed_df':
         model = models.FixedRNN(
             num_ts=data.num_ts, cat_dims=data.global_cat_dims,
             tree=data.tree)
