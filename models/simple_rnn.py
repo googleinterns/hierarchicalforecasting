@@ -81,7 +81,10 @@ class FixedRNN(keras.Model):
 
         enc_inp = tf.concat([y_prev, feats_prev], axis=-1)  # t/2 x b x D'
 
-        loadings = tf.expand_dims(node_emb, 0)  # 1 x b x h
+        if flags.node_emb_dim == 1:
+            loadings = 1.0
+        else:
+            loadings = tf.expand_dims(node_emb, 0)  # 1 x b x h
 
         outputs = []
         for e, d, o in zip(self.encoders, self.decoders, self.output_layers):
@@ -179,6 +182,7 @@ class FixedRNN(keras.Model):
             test_loss = tf.reduce_mean(test_loss).numpy()
 
             y_pred = data.inverse_transform(y_pred.numpy())
+            y_pred = np.clip(y_pred, 0.0, np.inf)
 
             y_true = y_obs[flags.cont_len:].numpy()
             y_true = data.inverse_transform(y_true)
@@ -216,16 +220,17 @@ class FixedRNN(keras.Model):
             
             df = pd.DataFrame(data=results_list)
             df.set_index('level', inplace=True)
-            print(tabulate(df, showindex=False, headers='keys', tablefmt='psql'))
+            print(tabulate(df, headers='keys', tablefmt='psql'))
             print(f'Test loss: {test_loss}')
         # np.save('notebooks/evals.npy', y_pred)
         return df, test_loss
 
 
 def mape(y_pred, y_true):
-    abs_diff = np.abs(y_pred - y_true)
-    abs_val = np.abs(y_true)
-    mape = np.mean(abs_diff/(abs_val + EPS))
+    abs_diff = np.abs(y_pred - y_true).flatten()
+    abs_val = np.abs(y_true).flatten()
+    idx = np.where(abs_val > 0.1)
+    mape = np.mean(abs_diff[idx]/abs_val[idx])
     return mape
 
 def wape(y_pred, y_true):
