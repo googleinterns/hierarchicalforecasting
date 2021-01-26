@@ -41,9 +41,9 @@ do
     echo
     echo "RUN ${i}"
     echo
-    CUDA_VISIBLE_DEVICES="1" python train.py \
-    --expt=exp_32_lr_0.01_ep_25/run_${i} --model=fixed --random_seed=${i} \
-    --fixed_lstm_hidden=11 --node_emb_dim=32 \
+    CUDA_VISIBLE_DEVICES="2" python train.py \
+    --expt=hid_16_exp_10_act_bias/run_${i} --model=fixed --random_seed=${i} \
+    --fixed_lstm_hidden=16 --node_emb_dim=10 \
     --batch_size=500 --train_epochs=25 --patience=5 --learning_rate=0.01
     # break  # Comment when running multiple expts
 done

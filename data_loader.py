@@ -88,12 +88,13 @@ class M5Data:
         assert(np.abs(np.sum(self.w) - 1.0) <= 1e-5)
 
     def transform_data(self):
-        self.transformer = StandardScaler()
-        self.ts_data = self.transformer.fit_transform(self.ts_data)
+        # Compute the mean of each node
+        leaf_mat = self.tree.leaf_matrix.T
+        num_leaf = np.sum(leaf_mat, axis=0, keepdims=True)
+        self.ts_data = self.ts_data / num_leaf
     
     def inverse_transform(self, pred):
-        inv_trans = self.transformer.inverse_transform(pred)
-        return inv_trans
+        return pred
 
     def train_gen(self):
         cont_len = flags.cont_len
@@ -244,24 +245,29 @@ class Tree:
 
 
 def main(_):
-    tree = Tree()
-    tree.insert_seq('food_2_1')
-    tree.insert_seq('food_2_2')
-    tree.insert_seq('hobbies_1')
-    tree.insert_seq('hobbies_2')
+    # tree = Tree()
+    # tree.insert_seq('food_2_1')
+    # tree.insert_seq('food_2_2')
+    # tree.insert_seq('hobbies_1')
+    # tree.insert_seq('hobbies_2')
 
-    tree.precompute()
+    # tree.precompute()
 
-    print(tree.parent)
-    print(tree.children)
-    print(tree.node_id)
-    print(tree.id_node)
+    # print(tree.parent)
+    # print(tree.children)
+    # print(tree.node_id)
+    # print(tree.id_node)
 
-    print(tree.leaf_matrix)
-    print(tree.adj_matrix)
-    print(tree.ancestor_matrix)
+    # print(tree.leaf_matrix)
+    # print(tree.adj_matrix)
+    # print(tree.ancestor_matrix)
 
-    # data = M5Data()
+    data = M5Data()
+    print(data.ts_data)
+    idx = data.tree.leaf_vector.astype(np.bool)
+    diff = data.ts_data[:, 0] - np.mean(data.ts_data[:, idx], axis=1)
+    diff = np.abs(diff)
+    print(np.sum(diff))
     # print(data.ts_data.dtype, data.ts_data.shape)
 
     # dataset = data.tf_dataset(True)

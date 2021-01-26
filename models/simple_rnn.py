@@ -24,7 +24,7 @@ class FixedRNN(keras.Model):
         self.tree = tree
 
         self.node_emb = tf.Variable(
-            np.random.uniform(size=[self.num_ts, flags.node_emb_dim]).astype(np.float32),
+            np.random.normal(size=[self.num_ts, flags.node_emb_dim]).astype(np.float32) * 0.05,
             name='node_emb'
         )
 
@@ -45,7 +45,7 @@ class FixedRNN(keras.Model):
             self.encoders.append(encoder)
             self.decoders.append(decoder)
         
-            output_layer = layers.Dense(1, use_bias=False)
+            output_layer = layers.Dense(1, use_bias=True)
             self.output_layers.append(output_layer)
     
     def get_normalized_emb(self):
@@ -55,6 +55,7 @@ class FixedRNN(keras.Model):
     
     def get_node_emb(self, nid):
         embs = self.get_normalized_emb()
+        # embs = self.node_emb
         node_emb = tf.nn.embedding_lookup(embs, nid)
         return node_emb
 
@@ -160,6 +161,7 @@ class FixedRNN(keras.Model):
         grads = tape.gradient(loss, self.trainable_variables)
         optimizer.apply_gradients(zip(grads, self.trainable_variables))
 
+        print('# Parameters in model', np.sum([np.prod(v.shape) for v in self.trainable_variables]))
         # print(self.trainable_variables)
         # for v in self.trainable_variables:
         #     print(v.name)
