@@ -23,8 +23,14 @@ class FixedRNN(keras.Model):
         
         self.tree = tree
 
+        # self.node_emb = tf.Variable(
+        #     np.random.normal(size=[self.num_ts, flags.node_emb_dim]).astype(np.float32) * 0.05,
+        #     name='node_emb'
+        # )
+        init_matrix = np.zeros((self.num_ts, flags.node_emb_dim)).astype(np.float32)
+        init_matrix[:, 0] = 1.0
         self.node_emb = tf.Variable(
-            np.random.normal(size=[self.num_ts, flags.node_emb_dim]).astype(np.float32) * 0.05,
+            init_matrix,
             name='node_emb'
         )
 
@@ -46,6 +52,7 @@ class FixedRNN(keras.Model):
             self.decoders.append(decoder)
         
             output_layer = layers.Dense(1, use_bias=True)
+                # kernel_initializer=keras.initializers.RandomUniform(-0.5, 0.5))
             self.output_layers.append(output_layer)
     
     def get_normalized_emb(self):
@@ -144,6 +151,34 @@ class FixedRNN(keras.Model):
         # final_output = tf.math.softplus(final_output)  # n
         return fixed_effect
     
+    @tf.function
+    def pretrain_step(self, feats, y_obs, nid, optimizer):
+        '''
+        feats:  b x t x d, b x t
+        y_obs:  b x t
+        nid: b
+        sw: b
+        ''' 
+        with tf.GradientTape() as tape:
+            pred = self(feats, y_obs[:flags.cont_len], nid)  # t x 1
+            mae = tf.abs(pred - y_obs[flags.cont_len:])  # t x 1
+            mae = tf.reduce_mean(mae)
+            loss = mae + self.regularizers()
+
+        train_vars = []
+        train_vars.extend(self.encoders[0].trainable_variables)
+        train_vars.extend(self.decoders[0].trainable_variables)
+        train_vars.extend(self.output_layers[0].trainable_variables)
+        for e in self.cat_feat_embs:
+            train_vars.extend(e.trainable_variables)
+
+        grads = tape.gradient(loss, train_vars)
+        optimizer.apply_gradients(zip(grads, train_vars))
+
+        print('# Parameters in model', np.sum([np.prod(v.shape) for v in self.trainable_variables]))
+        
+        return loss, mae
+
     @tf.function
     def train_step(self, feats, y_obs, nid, optimizer):
         '''
