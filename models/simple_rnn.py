@@ -24,7 +24,7 @@ class FixedRNN(keras.Model):
         self.tree = tree
 
         self.node_emb = tf.Variable(
-            np.random.normal(size=[self.num_ts, flags.node_emb_dim]).astype(np.float32) * 0.05,
+            np.random.uniform(size=[self.num_ts, flags.node_emb_dim]).astype(np.float32),
             name='node_emb'
         )
 
@@ -48,13 +48,12 @@ class FixedRNN(keras.Model):
             output_layer = layers.Dense(1, use_bias=True)
             self.output_layers.append(output_layer)
     
-    def get_normalized_emb(self):
-        embs = tf.abs(self.node_emb)
-        embs = embs / tf.reduce_sum(embs, axis=1, keepdims=True)
+    def get_transformed_emb(self):
+        embs = tf.exp(self.node_emb)
         return embs
     
     def get_node_emb(self, nid):
-        embs = self.get_normalized_emb()
+        embs = self.get_transformed_emb()
         # embs = self.node_emb
         node_emb = tf.nn.embedding_lookup(embs, nid)
         return node_emb
@@ -103,7 +102,7 @@ class FixedRNN(keras.Model):
         A = self.tree.adj_matrix  # n x n
         A = np.expand_dims(A, axis=0)  # 1 x n x n
 
-        embs = self.get_normalized_emb()  # n x e
+        embs = self.get_transformed_emb()  # n x e
         embs = tf.transpose(embs)  # e x n
         emb_1 = tf.expand_dims(embs, axis=-1)  # e x n x 1
         emb_2 = tf.expand_dims(embs, axis=-2)  # e x 1 x n
