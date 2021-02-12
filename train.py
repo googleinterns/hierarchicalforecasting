@@ -23,28 +23,16 @@ def main(_):
         print(f'\t--{flag.name}={flag._value}')
 
     '''Load data'''
-    if flags.dataset == 'm5':
-        data = data_loader.M5Data()
-    else:
-        raise ValueError(f'Unknown dataset {flags.dataset}')
-
-    '''Create model'''
-    if flags.model == 'fixed_df':
-        model = models.FixedRNN(
-            num_ts=data.num_ts, cat_dims=data.global_cat_dims,
-            tree=data.tree)
-    elif flags.model == 'random':
-        model = models.RandomRNN(
-            num_ts=data.num_ts, train_weights=train_weights, cat_dims=data.global_cat_dims)
-    else:
-        raise ValueError(f'Unknown model {flags.model}')
+    data = data_loader.Data()
     
+    '''Create model'''
+    model = models.FixedRNN(
+        num_ts=data.num_ts, cat_dims=data.global_cat_dims,
+        tree=data.tree)
+
     '''Compute path to experiment directory'''
-    model_name = flags.model
-    if flags.reg_type is not None:
-        model_name += '_' + flags.reg_type
     expt_dir = os.path.join('./logs',
-        flags.dataset, model_name, flags.expt)
+        flags.dataset, flags.expt)
 
     step = tf.Variable(0)
 
@@ -75,7 +63,8 @@ def main(_):
     
     summary = Summary(expt_dir)
 
-    eval_df, test_loss = model.eval(data)
+    model.eval(data, 'val')
+    model.eval(data, 'test')
     # sys.exit()
     # print(eval_df.loc['mean']['wape'])
     # summary.update(eval_dict)
@@ -91,7 +80,7 @@ def main(_):
         sys.stdout.flush()
         optimizer.learning_rate.assign(sch(step))
 
-        iterator = tqdm(data.tf_dataset(train=True), mininterval=2)
+        iterator = tqdm(data.tf_dataset(mode='train'), mininterval=2)
         for i, (feats, y_obs, nid) in enumerate(iterator):
             reg_loss, loss = model.train_step(feats, y_obs, nid, optimizer)
             '''Train metrics'''
@@ -106,28 +95,30 @@ def main(_):
         summary.update({"train/learning_rate": optimizer.learning_rate.numpy()})
 
         '''Test metrics'''
-        eval_df, test_loss = model.eval(data)
+        val_metrics = model.eval(data, 'val')
+        test_metrics = model.eval(data, 'test')
 
-        tracked_loss = eval_df.loc['mean']['wape']
+        tracked_loss = val_metrics.loc['mean']['wape']
         if tracked_loss < best_loss:
             best_loss = tracked_loss
             best_check_path = ckpt_manager.latest_checkpoint
             pat = 0
 
-            eval_save_path = os.path.join(expt_dir, "eval.pkl")
+            eval_save_path = os.path.join(expt_dir, "metrics.pkl")
             with open(eval_save_path, "wb") as fout:
-                pickle.dump(eval_df, fout)
+                pickle.dump(
+                    {'val': val_metrics, 'test': test_metrics}, fout)
 
             print("saved best result so far...")
         else:
             pat += 1
             if pat > flags.patience:
-                print("early stopped with best loss: {}".format(best_loss))
-                print("best model at: {}".format(best_check_path))
+                print("Early stopping")
                 break
 
-        # summary.update(eval_dict)
         summary.write(step=step.numpy())
+
+    print(f'Best model at {best_check_path} with loss = {best_loss}')
 
     '''Save embeddings to file'''
     # emb = model.get_node_emb(np.arange(data.num_ts))

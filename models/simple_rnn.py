@@ -63,8 +63,8 @@ class FixedRNN(keras.Model):
         feats = tf.expand_dims(feats, 1)  # t x 1 x d
         feats = tf.repeat(feats, repeats=nid.shape[0], axis=1)  # t x b x d
 
-        feats_prev = feats[:flags.cont_len]  # t/2 x b x d
-        feats_futr = feats[flags.cont_len:]  # t/2 x b x d
+        feats_prev = feats[:flags.hist_len]  # t/2 x b x d
+        feats_futr = feats[flags.hist_len:]  # t/2 x b x d
 
         enc_inp = tf.concat([y_prev, feats_prev], axis=-1)  # t/2 x b x D'
 
@@ -80,7 +80,7 @@ class FixedRNN(keras.Model):
         A = self.tree.adj_matrix  # n x n
         A = np.expand_dims(A, axis=0)  # 1 x n x n
 
-        embs = self.get_normalized_emb()  # n x e
+        embs = self.get_transformed_emb()  # n x e
         embs = tf.transpose(embs)  # e x n
         emb_1 = tf.expand_dims(embs, axis=-1)  # e x n x 1
         emb_2 = tf.expand_dims(embs, axis=-2)  # e x 1 x n
@@ -120,7 +120,7 @@ class FixedRNN(keras.Model):
         fixed_effect = self.get_fixed(feats, y_prev, nid)  # t x b
         # final_output = tf.math.softplus(final_output)  # n
         return fixed_effect
-    
+
     @tf.function
     def train_step(self, feats, y_obs, nid, optimizer):
         '''
@@ -130,16 +130,15 @@ class FixedRNN(keras.Model):
         sw: b
         ''' 
         with tf.GradientTape() as tape:
-            pred = self(feats, y_obs[:flags.cont_len], nid)  # t x 1
-            mae = tf.abs(pred - y_obs[flags.cont_len:])  # t x 1
+            pred = self(feats, y_obs[:flags.hist_len], nid)  # t x 1
+            mae = tf.abs(pred - y_obs[flags.hist_len:])  # t x 1
             mae = tf.reduce_mean(mae)
             loss = mae + self.regularizers()
 
         grads = tape.gradient(loss, self.trainable_variables)
         optimizer.apply_gradients(zip(grads, self.trainable_variables))
 
-        print('# Parameters in model ', np.sum([np.prod(v.shape) for v in self.trainable_variables]))
-
+        print('# Parameters in model', np.sum([np.prod(v.shape) for v in self.trainable_variables]))
         # print(self.trainable_variables)
         # for v in self.trainable_variables:
         #     print(v.name)
@@ -148,62 +147,76 @@ class FixedRNN(keras.Model):
 
         return loss, mae
 
-    def eval(self, data):
-        iterator = data.tf_dataset(train=False)
+    def eval(self, data, mode):
+        iterator = data.tf_dataset(mode=mode)
         level_dict = data.tree.levels
-        cont_len = flags.cont_len
+        hist_len = flags.hist_len
+        pred_len = flags.test_pred
+
+        all_y_true = None
+        all_y_pred = None
+
+        def set_or_concat(A, B):
+            if A is None:
+                return B
+            return np.concatenate((A, B), axis=0)
 
         for feats, y_obs, nid in iterator:
-            assert(y_obs.numpy().shape[0] == 2 * cont_len)
-            assert(feats[0].numpy().shape[0] == 2 * cont_len)
+            assert(y_obs.numpy().shape[0] == hist_len + pred_len)
+            assert(feats[0].numpy().shape[0] == hist_len + pred_len)
 
-            y_pred = self(feats, y_obs[:cont_len], nid)
-            test_loss = tf.abs(y_pred - y_obs[flags.cont_len:])  # t x 1
+            y_pred = self(feats, y_obs[:hist_len], nid)
+            test_loss = tf.abs(y_pred - y_obs[hist_len:])  # t x 1
             test_loss = tf.reduce_mean(test_loss).numpy()
 
             y_pred = data.inverse_transform(y_pred.numpy())
             y_pred = np.clip(y_pred, 0.0, np.inf)
+                    # Assuming predictions are positive
 
-            y_true = y_obs[flags.cont_len:].numpy()
+            y_true = y_obs[hist_len:].numpy()
             y_true = data.inverse_transform(y_true)
 
-            results_list = []
+            all_y_pred = set_or_concat(all_y_pred, y_pred)
+            all_y_true = set_or_concat(all_y_true, y_true)
 
-            '''Compute metrics for all time series together'''
+        results_list = []
+
+        '''Compute metrics for all time series together'''
+        results_dict = {}
+        results_dict['level'] = 'all'
+        for metric in METRICS:
+            eval_fn = METRICS[metric]
+            results_dict[metric] = eval_fn(all_y_pred, all_y_true)
+        results_list.append(results_dict)
+
+        '''Compute metrics for individual levels and their mean across levels'''
+        mean_dict = {metric: [] for metric in METRICS}
+
+        for d in level_dict:
             results_dict = {}
-            results_dict['level'] = 'all'
-            for metric in metrics:
-                eval_fn = metrics[metric]
-                results_dict[metric] = eval_fn(y_pred, y_true)
+            sub_pred = all_y_pred[:, level_dict[d]]
+            sub_true = all_y_true[:, level_dict[d]]
+            for metric in METRICS:
+                eval_fn = METRICS[metric]
+                eval_val = eval_fn(sub_pred, sub_true)
+                results_dict[metric] = eval_val
+                mean_dict[metric].append(eval_val)
+            results_dict['level'] = d
             results_list.append(results_dict)
+        
+        '''Compute the mean result of all the levels'''
+        for metric in mean_dict:
+            mean_dict[metric] = np.mean(mean_dict[metric])
+        mean_dict['level'] = 'mean'
+        results_list.append(mean_dict)
+        
+        df = pd.DataFrame(data=results_list)
+        df.set_index('level', inplace=True)
+        print('\n###', mode.upper())
+        print(tabulate(df, headers='keys', tablefmt='psql'))
+        print(f'Loss: {test_loss}')
 
-            '''Compute metrics for individual levels and their mean across levels'''
-            mean_dict = {metric: [] for metric in metrics}
-
-            for d in level_dict:
-                results_dict = {}
-                sub_pred = y_pred[:, level_dict[d]]
-                sub_true = y_true[:, level_dict[d]]
-                for metric in metrics:
-                    eval_fn = metrics[metric]
-                    eval_val = eval_fn(sub_pred, sub_true)
-                    results_dict[metric] = eval_val
-                    mean_dict[metric].append(eval_val)
-                results_dict['level'] = d
-                results_list.append(results_dict)
-            
-            '''Compute the mean result of all the levels'''
-            for d in mean_dict:
-                mean_dict[d] = np.mean(mean_dict[d])
-            mean_dict['level'] = 'mean'
-            results_list.append(mean_dict)
-            
-            df = pd.DataFrame(data=results_list)
-            df.set_index('level', inplace=True)
-            print(tabulate(df, headers='keys', tablefmt='psql'))
-            print(f'Test loss: {test_loss}')
-        # np.save('notebooks/evals.npy', y_pred)
-        return df, test_loss
+        return df
 
 
 def mape(y_pred, y_true):
@@ -226,4 +239,4 @@ def smape(y_pred, y_true):
     return smape
 
 
-metrics = {'mape': mape, 'wape': wape, 'smape': smape}
+METRICS = {'mape': mape, 'wape': wape, 'smape': smape}
