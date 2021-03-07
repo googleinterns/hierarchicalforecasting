@@ -76,7 +76,7 @@ class Data:
             tot_len - (flags.val_windows + flags.test_windows) * flags.test_pred \
                 - flags.hist_len
         end_idx = tot_len - (flags.test_windows + 1) * flags.test_pred - flags.hist_len
-        for i in range(start_idx, end_idx, pred_len):
+        for i in range(start_idx, end_idx+1, pred_len):
             sub_ts = self.ts_data[i:i+hist_len+pred_len]
             sub_feat_cont = self.global_cont_feats[i:i+hist_len+pred_len]
             sub_feat_cat = tuple(
@@ -94,7 +94,8 @@ class Data:
             tot_len - flags.test_windows * flags.test_pred \
                 - flags.hist_len
         end_idx = tot_len - flags.test_pred - flags.hist_len
-        for i in range(start_idx, end_idx, pred_len):
+
+        for i in range(start_idx, end_idx+1, pred_len):
             sub_ts = self.ts_data[i:i+hist_len+pred_len]
             sub_feat_cont = self.global_cont_feats[i:i+hist_len+pred_len]
             sub_feat_cat = tuple(
@@ -111,10 +112,12 @@ class Data:
         elif mode == 'test':
             gen_fn = self.test_gen
 
+        num_cat_feats = len(self.global_cat_dims)
+        output_type = tuple([tf.int32] * num_cat_feats)
         dataset = tf.data.Dataset.from_generator(
             gen_fn,
             (
-                (tf.float32, (tf.int32, tf.int32)),  # feats
+                (tf.float32, output_type),  # feats
                 tf.float32,  # y_obs
                 tf.int32,  # id
             )

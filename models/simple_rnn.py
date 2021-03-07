@@ -10,7 +10,7 @@ from tensorflow.keras import layers
 
 
 flags = global_flags.FLAGS
-MAX_FEAT_EMB_DIM = 50
+MAX_FEAT_EMB_DIM = 5
 EPS = 1e-7
 
 
@@ -23,10 +23,18 @@ class FixedRNN(keras.Model):
         
         self.tree = tree
 
-        assert(flags.fixed_lstm_hidden == flags.node_emb_dim)
+        # assert(flags.fixed_lstm_hidden == flags.node_emb_dim)
+
+        # self.node_emb = tf.Variable(
+        #     np.random.uniform(size=[self.num_ts, flags.node_emb_dim]).astype(np.float32),
+        #     name='node_emb'
+        # )
+
+        init_mat = np.random.normal(size=[self.num_ts, flags.node_emb_dim]).astype(np.float32)
+        # init_mat = self.tree.ancestor_matrix @ init_mat
 
         self.node_emb = tf.Variable(
-            np.random.uniform(size=[self.num_ts, flags.node_emb_dim]).astype(np.float32),
+            init_mat,
             name='node_emb'
         )
 
@@ -39,6 +47,7 @@ class FixedRNN(keras.Model):
                                 return_state=True, time_major=True)
         self.decoder = layers.LSTM(flags.fixed_lstm_hidden,
                                 return_sequences=True, time_major=True)
+        self.dense = layers.Dense(flags.node_emb_dim)
     
     def get_node_emb(self, nid):
         embs = self.node_emb
@@ -54,10 +63,17 @@ class FixedRNN(keras.Model):
         all_feats = feats_emb + [feats_cont]  # [t x *]
         all_feats = tf.concat(all_feats, axis=-1)  # t x d
         return all_feats
-    
-    def get_fixed(self, feats, y_prev, nid):
-        y_prev = tf.expand_dims(y_prev, -1)  # t/2 x b x 1
 
+    @tf.function
+    def call(self, feats, y_prev, nid):
+        '''
+        feats: t x d, t
+        y_prev: t x b
+        nid: b
+        sw: b
+        '''
+        feats = self.assemble_feats(feats)  # t x d
+        y_prev = tf.expand_dims(y_prev, -1)  # t/2 x b x 1
         node_emb = self.get_node_emb(nid)  # b x h
         
         feats = tf.expand_dims(feats, 1)  # t x 1 x d
@@ -72,53 +88,9 @@ class FixedRNN(keras.Model):
 
         _, h, c = self.encoder(inputs=enc_inp)  # b x h
         output = self.decoder(inputs=feats_futr, initial_state=(h, c))  # t x b x h
+        output = self.dense(output)
 
         fixed_effect = tf.reduce_sum(output * loadings, axis=-1)  # t x b
-        return fixed_effect
-
-    def l_p_norm_reg(self, p):
-        A = self.tree.adj_matrix  # n x n
-        A = np.expand_dims(A, axis=0)  # 1 x n x n
-
-        embs = self.get_transformed_emb()  # n x e
-        embs = tf.transpose(embs)  # e x n
-        emb_1 = tf.expand_dims(embs, axis=-1)  # e x n x 1
-        emb_2 = tf.expand_dims(embs, axis=-2)  # e x 1 x n
-        
-        edge_diff = emb_1 * A - emb_2 * A
-        if p==1:
-            edge_diff = tf.abs(edge_diff)  # L1 regularization
-        elif p==2:
-            edge_diff = edge_diff * edge_diff  # L2 regularization
-        reg = flags.reg_weight * tf.reduce_mean(edge_diff)
-
-        return reg
-
-    def regularizers(self):
-        if flags.reg_type == 'l1':
-            reg = self.l_p_norm_reg(p=1)
-        elif flags.reg_type == 'l2':
-            reg = self.l_p_norm_reg(p=2)
-        elif flags.reg_type is None:
-            reg = 0
-        else:
-            raise ValueError(f'Unknown regularization of type {flags.reg_type}')
-
-        return reg
-
-    @tf.function
-    def call(self, feats, y_prev, nid):
-        '''
-        feats: t x d, t
-        y_prev: t x b
-        nid: b
-        sw: b
-        '''
-        feats = self.assemble_feats(feats)  # t x d
-
-        # Computing fixed effects
-        fixed_effect = self.get_fixed(feats, y_prev, nid)  # t x b
-        # final_output = tf.math.softplus(final_output)  # n
         return fixed_effect
 
     @tf.function
@@ -132,8 +104,7 @@ class FixedRNN(keras.Model):
         with tf.GradientTape() as tape:
             pred = self(feats, y_obs[:flags.hist_len], nid)  # t x 1
             mae = tf.abs(pred - y_obs[flags.hist_len:])  # t x 1
-            mae = tf.reduce_mean(mae)
-            loss = mae + self.regularizers()
+            loss = tf.reduce_mean(mae)
 
         grads = tape.gradient(loss, self.trainable_variables)
         optimizer.apply_gradients(zip(grads, self.trainable_variables))

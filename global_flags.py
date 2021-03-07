@@ -23,7 +23,5 @@ flags.DEFINE_integer("patience", 5, "Patience for early stopping")
 
 flags.DEFINE_float('learning_rate', 0.001,
                    'Learning rate')
-flags.DEFINE_float('reg_weight', 0.0,
-                   'Regularization weight')
 
 FLAGS = flags.FLAGS

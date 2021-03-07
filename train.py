@@ -37,11 +37,12 @@ def main(_):
     step = tf.Variable(0)
 
     '''LR scheduling'''
-    num_changes = 9
-    boundaries = flags.train_epochs * np.linspace(0.1, 0.9, num_changes-1)
+    num_changes = 4
+    boundaries = flags.train_epochs * np.linspace(0, 1, num_changes+1)
+    boundaries = boundaries[1:-1]
     boundaries = boundaries.astype(np.int32).tolist()
 
-    lr = flags.learning_rate * np.asarray([0.5**(i+1) for i in range(num_changes)])
+    lr = flags.learning_rate * np.asarray([0.1**i for i in range(num_changes)])
     lr = lr.tolist()
 
     sch = keras.optimizers.schedules.PiecewiseConstantDecay(boundaries=boundaries, values=lr)
@@ -98,7 +99,7 @@ def main(_):
         val_metrics = model.eval(data, 'val')
         test_metrics = model.eval(data, 'test')
 
-        tracked_loss = val_metrics.loc['mean']['wape']
+        tracked_loss = val_metrics.loc['all']['wape']
         if tracked_loss < best_loss:
             best_loss = tracked_loss
             best_check_path = ckpt_manager.latest_checkpoint
