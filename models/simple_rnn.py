@@ -3,6 +3,7 @@ import numpy as np
 import global_flags
 import sys
 import pandas as pd
+import pickle
 from tabulate import tabulate
 
 from tensorflow import keras
@@ -10,7 +11,7 @@ from tensorflow.keras import layers
 
 
 flags = global_flags.FLAGS
-MAX_FEAT_EMB_DIM = 50
+MAX_FEAT_EMB_DIM = 5
 EPS = 1e-7
 
 
@@ -23,20 +24,19 @@ class FixedRNN(keras.Model):
         
         self.tree = tree
 
-        # self.node_emb = tf.Variable(
-        #     np.random.normal(size=[self.num_ts, flags.node_emb_dim]).astype(np.float32) * 0.05,
-        #     name='node_emb'
-        # )
-        init_matrix = np.zeros((self.num_ts, flags.node_emb_dim)).astype(np.float32)
-        init_matrix[:, 0] = 1.0
+        init_mat = np.random.normal(size=[self.num_ts, flags.node_emb_dim]).astype(np.float32) * 0.1
+        init_mat = self.tree.ancestor_matrix @ init_mat
+
         self.node_emb = tf.Variable(
-            np.random.uniform(size=[self.num_ts, flags.node_emb_dim]).astype(np.float32),
+            init_mat,
             name='node_emb'
         )
-
+        
+        cat_emb_dims = [min(MAX_FEAT_EMB_DIM, (dim+1)//2) for dim in self.cat_dims]
+        print('Cat feat emb dims:', cat_emb_dims)
         self.cat_feat_embs = [
-            layers.Embedding(input_dim=dim, output_dim=min(MAX_FEAT_EMB_DIM, (dim+1)//2))
-            for dim in self.cat_dims
+            layers.Embedding(input_dim=idim, output_dim=odim) \
+            for idim, odim in zip(self.cat_dims, cat_emb_dims)
         ]
 
         self.encoders = []
@@ -62,6 +62,7 @@ class FixedRNN(keras.Model):
     def get_node_emb(self, nid):
         # embs = self.get_transformed_emb()
         embs = self.node_emb
+        # embs = tf.matmul(self.tree.ancestor_matrix, embs)
         node_emb = tf.nn.embedding_lookup(embs, nid)
         return node_emb
 
@@ -74,10 +75,82 @@ class FixedRNN(keras.Model):
         all_feats = feats_emb + [feats_cont]  # [t x *]
         all_feats = tf.concat(all_feats, axis=-1)  # t x d
         return all_feats
-    
-    def get_fixed(self, feats, y_prev, nid):
-        y_prev = tf.expand_dims(y_prev, -1)  # t/2 x b x 1
 
+    # def l_p_norm_reg(self, p):
+    #     A = self.tree.adj_matrix  # n x n
+    #     A = np.expand_dims(A, axis=0)  # 1 x n x n
+
+    #     embs = self.get_transformed_emb()  # n x e
+    #     embs = tf.transpose(embs)  # e x n
+    #     emb_1 = tf.expand_dims(embs, axis=-1)  # e x n x 1
+    #     emb_2 = tf.expand_dims(embs, axis=-2)  # e x 1 x n
+        
+    #     edge_diff = emb_1 * A - emb_2 * A
+    #     if p==1:
+    #         edge_diff = tf.abs(edge_diff)  # L1 regularization
+    #     elif p==2:
+    #         edge_diff = edge_diff * edge_diff  # L2 regularization
+    #     reg = flags.reg_weight * tf.reduce_mean(edge_diff)
+
+    #     return reg
+
+    def emb_regularizer(self):
+        if flags.emb_reg_weight > 0:
+            ''' Leaves close to the mean leaf embedding '''
+            # leaf_mat = self.tree.leaf_matrix
+            # leaf_mat = leaf_mat / np.sum(leaf_mat, axis=1, keepdims=True)
+            # assert(np.abs(np.sum(leaf_mat[0]) - 1.0) < 1e-7)
+            # embs = self.node_emb
+            # leaf_means = leaf_mat @ embs
+            # diff = embs - leaf_means
+            # reg = tf.reduce_sum(tf.square(diff))
+            # return flags.emb_reg_weight * reg
+            
+            ''' Leaves close to each embedding '''
+            leaf_mat = self.tree.leaf_matrix
+            leaf_vector = self.tree.leaf_vector
+            reg = 0.0
+
+            for i in range(len(leaf_vector)):
+                if leaf_vector[i] < 0.5:
+                    leaves = leaf_mat[i]
+                    idx = np.where(leaves > 0.5)[0]
+                    
+                    embA = self.get_node_emb(np.array([i]))  # 1 x d
+                    sub_emb = self.get_node_emb(idx)  # l x d
+                    diff = tf.square(embA - sub_emb)  # l x d
+                    sub_reg = tf.reduce_sum(diff, axis=1)  # l
+                    sub_reg = tf.reduce_mean(diff)
+                    reg += sub_reg
+            
+            return reg * flags.emb_reg_weight
+
+        return 0.0
+    
+    def factor_regularizer(self, factors):
+        ''' factors t x b x h '''
+        if flags.act_reg_weight > 0:
+            print('Activation regularization True')
+            factors = tf.transpose(factors, [1, 0, 2])  # b x t x h
+            shuffled = tf.gather(
+                factors,
+                tf.random.shuffle(tf.range(flags.batch_size))
+            )
+            reg = tf.reduce_sum(tf.square(factors - shuffled))
+            return flags.act_reg_weight * reg
+        else:
+            return 0.0
+
+    @tf.function
+    def call(self, feats, y_prev, nid):
+        '''
+        feats: t x d, t
+        y_prev: t x b
+        nid: b
+        sw: b
+        '''
+        feats = self.assemble_feats(feats)  # t x d
+        y_prev = tf.expand_dims(y_prev, -1)  # t/2 x b x 1
         node_emb = self.get_node_emb(nid)  # b x h
         
         feats = tf.expand_dims(feats, 1)  # t x 1 x d
@@ -103,80 +176,8 @@ class FixedRNN(keras.Model):
         outputs = tf.concat(outputs, axis=-1)  # t x b x h
 
         fixed_effect = tf.reduce_sum(outputs * loadings, axis=-1)  # t x b
-        return fixed_effect
-
-    def l_p_norm_reg(self, p):
-        A = self.tree.adj_matrix  # n x n
-        A = np.expand_dims(A, axis=0)  # 1 x n x n
-
-        embs = self.get_transformed_emb()  # n x e
-        embs = tf.transpose(embs)  # e x n
-        emb_1 = tf.expand_dims(embs, axis=-1)  # e x n x 1
-        emb_2 = tf.expand_dims(embs, axis=-2)  # e x 1 x n
-        
-        edge_diff = emb_1 * A - emb_2 * A
-        if p==1:
-            edge_diff = tf.abs(edge_diff)  # L1 regularization
-        elif p==2:
-            edge_diff = edge_diff * edge_diff  # L2 regularization
-        reg = flags.reg_weight * tf.reduce_mean(edge_diff)
-
-        return reg
-
-    def regularizers(self):
-        if flags.reg_type == 'l1':
-            reg = self.l_p_norm_reg(p=1)
-        elif flags.reg_type == 'l2':
-            reg = self.l_p_norm_reg(p=2)
-        elif flags.reg_type is None:
-            reg = 0
-        else:
-            raise ValueError(f'Unknown regularization of type {flags.reg_type}')
-
-        return reg
-
-    @tf.function
-    def call(self, feats, y_prev, nid):
-        '''
-        feats: t x d, t
-        y_prev: t x b
-        nid: b
-        sw: b
-        '''
-        feats = self.assemble_feats(feats)  # t x d
-
-        # Computing fixed effects
-        fixed_effect = self.get_fixed(feats, y_prev, nid)  # t x b
         # final_output = tf.math.softplus(final_output)  # n
-        return fixed_effect
-    
-    # @tf.function
-    # def pretrain_step(self, feats, y_obs, nid, optimizer):
-    #     '''
-    #     feats:  b x t x d, b x t
-    #     y_obs:  b x t
-    #     nid: b
-    #     sw: b
-    #     ''' 
-    #     with tf.GradientTape() as tape:
-    #         pred = self(feats, y_obs[:flags.cont_len], nid)  # t x 1
-    #         mae = tf.abs(pred - y_obs[flags.cont_len:])  # t x 1
-    #         mae = tf.reduce_mean(mae)
-    #         loss = mae + self.regularizers()
-
-    #     train_vars = []
-    #     train_vars.extend(self.encoders[0].trainable_variables)
-    #     train_vars.extend(self.decoders[0].trainable_variables)
-    #     train_vars.extend(self.output_layers[0].trainable_variables)
-    #     for e in self.cat_feat_embs:
-    #         train_vars.extend(e.trainable_variables)
-
-    #     grads = tape.gradient(loss, train_vars)
-    #     optimizer.apply_gradients(zip(grads, train_vars))
-
-    #     print('# Parameters in model', np.sum([np.prod(v.shape) for v in self.trainable_variables]))
-        
-    #     return loss, mae
+        return fixed_effect, outputs
 
     @tf.function
     def train_step(self, feats, y_obs, nid, optimizer):
@@ -185,12 +186,12 @@ class FixedRNN(keras.Model):
         y_obs:  b x t
         nid: b
         sw: b
-        ''' 
+        '''
         with tf.GradientTape() as tape:
-            pred = self(feats, y_obs[:flags.hist_len], nid)  # t x 1
+            pred, factors = self(feats, y_obs[:flags.hist_len], nid)  # t x 1
             mae = tf.abs(pred - y_obs[flags.hist_len:])  # t x 1
             mae = tf.reduce_mean(mae)
-            loss = mae + self.regularizers()
+            loss = mae + self.emb_regularizer() + self.factor_regularizer(factors)
 
         grads = tape.gradient(loss, self.trainable_variables)
         optimizer.apply_gradients(zip(grads, self.trainable_variables))
@@ -222,7 +223,7 @@ class FixedRNN(keras.Model):
             assert(y_obs.numpy().shape[0] == hist_len + pred_len)
             assert(feats[0].numpy().shape[0] == hist_len + pred_len)
 
-            y_pred = self(feats, y_obs[:hist_len], nid)
+            y_pred, factors = self(feats, y_obs[:hist_len], nid)
             test_loss = tf.abs(y_pred - y_obs[hist_len:])  # t x 1
             test_loss = tf.reduce_mean(test_loss).numpy()
 
@@ -235,6 +236,9 @@ class FixedRNN(keras.Model):
 
             all_y_pred = set_or_concat(all_y_pred, y_pred)
             all_y_true = set_or_concat(all_y_true, y_true)
+        
+        with open('notebooks/evals.pkl', 'wb') as fout:
+            pickle.dump((all_y_pred, all_y_true), fout)
 
         results_list = []
 

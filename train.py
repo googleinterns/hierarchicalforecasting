@@ -37,11 +37,10 @@ def main(_):
     step = tf.Variable(0)
 
     '''LR scheduling'''
-    num_changes = 9
-    boundaries = flags.train_epochs * np.linspace(0.1, 0.9, num_changes-1)
+    boundaries = flags.train_epochs * np.linspace(0.0, 1.0, flags.num_changes)
     boundaries = boundaries.astype(np.int32).tolist()
 
-    lr = flags.learning_rate * np.asarray([0.5**(i+1) for i in range(num_changes)])
+    lr = flags.learning_rate * np.asarray([0.5**i for i in range(flags.num_changes + 1)])
     lr = lr.tolist()
 
     sch = keras.optimizers.schedules.PiecewiseConstantDecay(boundaries=boundaries, values=lr)
@@ -74,25 +73,6 @@ def main(_):
     pat = 0
     best_check_path = None
 
-    # if step.numpy() == 0:
-    #     print('Pre-training ...')
-    #     optimizer.learning_rate.assign(sch(step))
-
-    #     for pre_ep in range(3):
-    #         print('Pre-train ep', pre_ep)
-    #         iterator = tqdm(data.tf_dataset(train=True), mininterval=2)
-    #         for i, (feats, y_obs, nid) in enumerate(iterator):
-    #             reg_loss, loss = model.pretrain_step(feats, y_obs, nid, optimizer)
-    #             summary.update({"train/reg_loss": reg_loss, "train/loss": loss})
-    #             if i % 100 == 0:
-    #                 mean_loss = summary.metric_dict["train/reg_loss"].result().numpy()
-    #                 iterator.set_description(f"Reg + Loss {mean_loss:.4f}")
-    #         eval_df, test_loss = model.eval(data)
-    #         summary.write(step=0)
-    
-    #     init_matrix = np.random.uniform(size=[data.num_ts, flags.node_emb_dim]).astype(np.float32)
-    #     model.node_emb.assign(init_matrix)
-
     while step.numpy() < flags.train_epochs:
         ep = step.numpy()
         print(f"Epoch {ep}")
@@ -117,7 +97,7 @@ def main(_):
         val_metrics = model.eval(data, 'val')
         test_metrics = model.eval(data, 'test')
 
-        tracked_loss = val_metrics.loc['mean']['wape']
+        tracked_loss = val_metrics.loc['all']['wape']
         if tracked_loss < best_loss:
             best_loss = tracked_loss
             best_check_path = ckpt_manager.latest_checkpoint

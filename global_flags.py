@@ -2,7 +2,6 @@ from absl import flags
 
 flags.DEFINE_string('expt', None, 'The name of the experiment dir')
 flags.DEFINE_string('dataset', 'm5', 'The name of the experiment dir')
-flags.DEFINE_string('reg_type', None, 'Type of hierarchy information to use')
 
 flags.DEFINE_integer('train_epochs', 25, 'Number of epochs to train')
 flags.DEFINE_integer('batch_size', None, 'Batch size for the randomly sampled batch')
@@ -20,10 +19,13 @@ flags.DEFINE_integer('node_emb_dim', 16,
 flags.DEFINE_integer('random_seed', None,
                     'The random seed to be used for TF and numpy')
 flags.DEFINE_integer("patience", 5, "Patience for early stopping")
+flags.DEFINE_integer("num_changes", 8, "Number of changes in the learning rate")
 
 flags.DEFINE_float('learning_rate', 0.001,
                    'Learning rate')
-flags.DEFINE_float('reg_weight', 0.0,
-                   'Regularization weight')
+flags.DEFINE_float('emb_reg_weight', 0.0,
+                   'Regularization weight for embeddings')
+flags.DEFINE_float('act_reg_weight', 0.0,
+                   'Regularization weight for activations')
 
 FLAGS = flags.FLAGS
