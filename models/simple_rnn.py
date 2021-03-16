@@ -24,6 +24,8 @@ class FixedRNN(keras.Model):
         
         self.tree = tree
 
+        # init_mat = np.random.normal(size=[self.num_ts, flags.node_emb_dim]).astype(np.float32)
+        
         init_mat = np.random.normal(size=[self.num_ts, flags.node_emb_dim]).astype(np.float32) * 0.1
         init_mat = self.tree.ancestor_matrix @ init_mat
 
@@ -161,10 +163,7 @@ class FixedRNN(keras.Model):
 
         enc_inp = tf.concat([y_prev, feats_prev], axis=-1)  # t/2 x b x D'
 
-        if flags.node_emb_dim == 1:
-            loadings = 1.0
-        else:
-            loadings = tf.expand_dims(node_emb, 0)  # 1 x b x h
+        loadings = tf.expand_dims(node_emb, 0)  # 1 x b x h
 
         outputs = []
         for e, d, o in zip(self.encoders, self.decoders, self.output_layers):
@@ -174,6 +173,7 @@ class FixedRNN(keras.Model):
             outputs.append(output)
 
         outputs = tf.concat(outputs, axis=-1)  # t x b x h
+        # outputs = tf.reduce_mean(outputs, axis=1, keepdims=True)  # t x 1 x h
 
         fixed_effect = tf.reduce_sum(outputs * loadings, axis=-1)  # t x b
         # final_output = tf.math.softplus(final_output)  # n
