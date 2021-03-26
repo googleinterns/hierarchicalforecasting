@@ -237,7 +237,7 @@ class FixedRNN(keras.Model):
             all_y_pred = set_or_concat(all_y_pred, y_pred)
             all_y_true = set_or_concat(all_y_true, y_true)
         
-        with open('notebooks/evals.pkl', 'wb') as fout:
+        with open(f'notebooks/evals/{mode}.pkl', 'wb') as fout:
             pickle.dump((all_y_pred, all_y_true), fout)
 
         results_list = []

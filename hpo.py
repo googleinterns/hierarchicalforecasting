@@ -7,50 +7,59 @@ import shutil
 import json
 
 def main():
-    for it in range(100):
-        batch_size = int(2 ** np.random.uniform(6, 9))
-        l2 = 10 ** np.random.uniform(-4, 1)
-        l2_slack = 10 ** np.random.uniform(-4, 1)
-        node_emb = np.random.randint(4, 25)
-        ep = np.random.randint(15, 30)
-        lr = 0.01
-        lstm_hidden = int(2 ** np.random.uniform(1, 5))
-        l1 = 10 ** np.random.uniform(-4, 1)
+    dataset = 'favorita'
+    
+    start = 500
+    for it in range(500):
+        try:
+            with open(f'logs/{dataset}/hpo/metrics_{it}.pkl', 'rb') as fin:
+                df = pickle.load(fin)
+        except FileNotFoundError:
+            start = it
+            break
+
+    print('Start iter', start)
+
+    for it in range(start, 500):
+        batch_size = 500
+        l2_act = 10 ** np.random.uniform(-10, -5)
+        l2_emb = 10 ** np.random.uniform(-6, -2)
+        node_emb = 8
+        ep = 40
+        lr = 0.003
+        lstm_hidden = 20
 
         hparams = {
             "batch_size": batch_size,
-            "l2": l2,
-            "l2_slack": l2_slack,
-            "node_emb": node_emb,
+            "l2_act": l2_act,
+            "l2_emb": l2_emb,
+            "node_emb": 8,
             "ep": ep,
             "lr": lr,
             "lstm_hidden": lstm_hidden,
-            "l1": l1
+            "dataset": dataset
         }
         print(f'HPARAMS run {it}:', hparams)
 
-        shutil.rmtree('logs/m5/fixed_sibling_reg/hpo/', ignore_errors=True)
-
-        for i in range(10):
-            cmd = ["python", "train.py", f"--expt=hpo/run_{i}",
-                f"--random_seed={i}", "--model=fixed", "--hierarchy=sibling_reg",
-                f"--batch_size={batch_size}", f"--l2_reg_weight={l2}",
-                f"--l2_weight_slack={l2_slack}", f"--l1_reg_weight={l1}",
-                f"--node_emb_dim={node_emb}", f"--fixed_lstm_hidden={lstm_hidden}",
-                "--overparam=True", "--output_scaling=True", f"--train_epochs={ep}",
-                f"--learning_rate={lr}"]
-            with open('logs/hpo.log', 'w') as fout:
-                subprocess.run(
-                    cmd, check=True, stdout=fout, stderr=subprocess.STDOUT,
-                    text=True
-                )
-        hparams['evals'] = []
-        for i in range(10):
-            with open(f'logs/m5/fixed_sibling_reg/hpo/run_{i}/eval.pkl', 'rb') as fin:
-                eval_dict = pickle.load(fin)
-            hparams['evals'].append(eval_dict)
+        shutil.rmtree(f'logs/{dataset}/hpo/run/', ignore_errors=True)
         
-        write(hparams)
+        cmd = ["python", "train.py", f"--expt=hpo/run/",
+            f"--random_seed=1", f"--dataset={dataset}",
+            f"--act_reg_weight={l2_act}", f"--emb_reg_weight={l2_emb}",
+            f"--node_emb_dim={node_emb}", f"--fixed_lstm_hidden={lstm_hidden}",
+            f"--batch_size={batch_size}", f"--train_epochs={ep}",
+            f"--learning_rate={lr}", f"--num_changes=6", "--patience=10",
+            "--hist_len=28", "--train_pred=28", "--test_pred=7", "--val_windows=5",
+            "--test_windows=5"]
+        with open('logs/hpo.log', 'w') as fout:
+            subprocess.run(
+                cmd, check=True, stdout=fout, stderr=subprocess.STDOUT,
+                text=True
+            )
+        
+        shutil.copyfile(f'logs/{dataset}/hpo/run/metrics.pkl', f'logs/{dataset}/hpo/metrics_{it}.pkl')
+        with open(f'logs/{dataset}/hpo/params_{it}.pkl', 'wb') as fout:
+            pickle.dump(cmd, fout)
 
 
 def write(hparams):
