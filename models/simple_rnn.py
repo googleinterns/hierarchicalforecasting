@@ -236,9 +236,6 @@ class FixedRNN(keras.Model):
 
             all_y_pred = set_or_concat(all_y_pred, y_pred)
             all_y_true = set_or_concat(all_y_true, y_true)
-        
-        with open(f'notebooks/evals/{mode}.pkl', 'wb') as fout:
-            pickle.dump((all_y_pred, all_y_true), fout)
 
         results_list = []
 
@@ -277,7 +274,7 @@ class FixedRNN(keras.Model):
         print(tabulate(df, headers='keys', tablefmt='psql'))
         print(f'Loss: {test_loss}')
 
-        return df
+        return df, (all_y_pred, all_y_true)
 
 
 def mape(y_pred, y_true):

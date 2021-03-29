@@ -94,8 +94,8 @@ def main(_):
         summary.update({"train/learning_rate": optimizer.learning_rate.numpy()})
 
         '''Test metrics'''
-        val_metrics = model.eval(data, 'val')
-        test_metrics = model.eval(data, 'test')
+        val_metrics, val_pred = model.eval(data, 'val')
+        test_metrics, test_pred = model.eval(data, 'test')
 
         tracked_loss = val_metrics.loc['all']['wape']
         if tracked_loss < best_loss:
@@ -107,6 +107,12 @@ def main(_):
             with open(eval_save_path, "wb") as fout:
                 pickle.dump(
                     {'val': val_metrics, 'test': test_metrics}, fout)
+            
+            with open(os.path.join(expt_dir, 'val.pkl'), 'wb') as fout:
+                pickle.dump(val_pred, fout)
+            
+            with open(os.path.join(expt_dir, 'test.pkl'), 'wb') as fout:
+                pickle.dump(test_pred, fout)
 
             print("saved best result so far...")
         else:

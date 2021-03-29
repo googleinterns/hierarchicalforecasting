@@ -1,17 +1,24 @@
 import numpy as np
 import pickle
 import tensorflow as tf
-# import tensorflow_addons as tfa
+import tensorflow_addons as tfa
 
 from tabulate import tabulate
 from tqdm import tqdm
 import pandas as pd
+import os
+from absl import flags, app
 
+flags.DEFINE_string('dir', None, 'The run directory for reconciliation')
+flags.DEFINE_string('dataset', None, 'Dataset name')
+flags.DEFINE_float('lamda', None, 'Reg parameter')
+
+flags = flags.FLAGS
 
 EPS = 1e-7
 
 
-def erm_reconcile(y, yhat, leaf_mat, reg_mat, lamda=0.1, max_iters=10000, tol=1e-7):
+def erm_reconcile(y, yhat, leaf_mat, reg_mat, lamda=0.1, max_iters=10000, tol=1e-1):
     """Function to calculate reconciliation matrix through ERM.
 
     Args
@@ -44,25 +51,26 @@ def erm_reconcile(y, yhat, leaf_mat, reg_mat, lamda=0.1, max_iters=10000, tol=1e
     stree_t = tf.convert_to_tensor(leaf_mat.T, dtype=tf.float32)
     p_bu_t = tf.convert_to_tensor(reg_mat, dtype=tf.float32)
 
-    p_matrix_t = tf.Variable(reg_mat, dtype=tf.float32)
-    optimizer = tf.optimizers.Adam(learning_rate=1e-3)
+    p_matrix_diff = tf.Variable(np.zeros(reg_mat.shape), dtype=tf.float32)
+    optimizer = tfa.optimizers.Yogi(learning_rate=1e-2, l1_regularization_strength=lamda)
     prev_loss = 0.0
 
     iterator = tqdm(range(max_iters), mininterval=1)
     for step in iterator:
         with tf.GradientTape() as tape:
+            p_matrix_t = p_matrix_diff + p_bu_t
             y_prime = tf.matmul(tf.matmul(yhat_t, p_matrix_t), stree_t)
             main_loss = tf.reduce_mean(tf.square(y_t - y_prime))
-            reg_loss = tf.reduce_mean(tf.abs(p_matrix_t - p_bu_t))
-            loss = main_loss + lamda * reg_loss
-        grads = tape.gradient(loss, [p_matrix_t])
-        optimizer.apply_gradients(zip(grads, [p_matrix_t]))
+            # reg_loss = tf.reduce_mean(tf.abs(p_matrix_t - p_bu_t))
+            loss = main_loss # + lamda * reg_loss
+        grads = tape.gradient(loss, [p_matrix_diff])
+        optimizer.apply_gradients(zip(grads, [p_matrix_diff]))
         iterator.set_description(f'Loss = {loss.numpy()}')
         if tf.abs(prev_loss - loss) < tol:
             print("Breaking at iter: {}".format(step))
             break
         prev_loss = loss
-    return p_matrix_t.numpy()
+    return p_matrix_diff.numpy() + reg_mat
 
 
 def eval(all_y_pred, all_y_true, tree):
@@ -102,6 +110,8 @@ def eval(all_y_pred, all_y_true, tree):
     df.set_index('level', inplace=True)
     print(tabulate(df, headers='keys', tablefmt='psql'))
 
+    return df
+
 
 def mape(y_pred, y_true):
     abs_diff = np.abs(y_pred - y_true).flatten()
@@ -124,17 +134,18 @@ def smape(y_pred, y_true):
 
 METRICS = {'mape': mape, 'wape': wape, 'smape': smape}
 
-def main():
-    with open('notebooks/evals/val.pkl', 'rb') as fin:
+def main(_):
+    with open(os.path.join(flags.dir, 'val.pkl'), 'rb') as fin:
         y_pred, y_true = pickle.load(fin)
     
-    with open('notebooks/evals/test.pkl', 'rb') as fin:
+    with open(os.path.join(flags.dir, 'test.pkl'), 'rb') as fin:
         test_pred, test_true = pickle.load(fin)
 
-    with open('data/favorita/data.pkl', 'rb') as fin:
+    with open(f'data/{flags.dataset}/data.pkl', 'rb') as fin:
         tree, ts_data, _ = pickle.load(fin)
 
-    num_val = int(y_pred.shape[0] * 0.3)
+    num_val = int(y_pred.shape[0] * 0.2)
+    print('*' * 10, 'num_val', num_val)
     
     train_pred, train_true = y_pred[:-num_val], y_true[:-num_val]
     val_pred, val_true = y_pred[num_val:], y_true[num_val:]
@@ -148,22 +159,33 @@ def main():
     reg_mat = sub_mat.copy()
     reg_mat[np.logical_not(leaf_vec)] = 0
 
-    p_matrix = erm_reconcile(train_true, train_pred, sub_mat, reg_mat, lamda=1e4, max_iters=500)
+    p_matrix = erm_reconcile(train_true, train_pred, sub_mat, reg_mat, lamda=flags.lamda)
     # p_matrix = reg_mat
-    print(p_matrix)
-    print(reg_mat)
+    # print(p_matrix)
+    # print(reg_mat)
+
+    print('Diff', np.sum(p_matrix - reg_mat))
 
     print('### Train')
-    train_pred = (train_pred @ p_matrix) @ sub_mat.T
-    eval(train_pred, train_true, tree)
+    train_rec = (train_pred @ p_matrix) @ sub_mat.T
+    eval(train_rec, train_true, tree)
 
     print('### Val')
-    val_pred = (val_pred @ p_matrix) @ sub_mat.T
-    eval(val_pred, val_true, tree)
+    val_rec = (val_pred @ p_matrix) @ sub_mat.T
+    eval(val_rec, val_true, tree)
 
-    print('### Test')
-    test_pred = (test_pred @ p_matrix) @ sub_mat.T
-    eval(test_pred, test_true, tree)
+    print('### Test ERM')
+    test_rec = (test_pred @ p_matrix) @ sub_mat.T
+    df = eval(test_rec, test_true, tree)
+    with open(os.path.join(flags.dir, 'erm_rec_metrics.pkl'), 'wb') as fout:
+        pickle.dump(df, fout)
+    
+    print('### Test BU')
+    test_rec = (test_pred @ reg_mat) @ sub_mat.T
+    df = eval(test_rec, test_true, tree)
+    with open(os.path.join(flags.dir, 'bu_metrics.pkl'), 'wb') as fout:
+        pickle.dump(df, fout)
+
 
 if __name__=='__main__':
-    main()
+    app.run(main)
