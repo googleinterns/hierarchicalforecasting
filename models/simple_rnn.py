@@ -31,7 +31,6 @@ class FixedRNN(keras.Model):
         # )
 
         init_mat = np.random.normal(size=[self.num_ts, flags.node_emb_dim]).astype(np.float32)
-        # init_mat = self.tree.ancestor_matrix @ init_mat
 
         self.node_emb = tf.Variable(
             init_mat,

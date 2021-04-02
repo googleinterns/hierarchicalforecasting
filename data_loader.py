@@ -127,14 +127,26 @@ class Data:
 
 def main(_):
     data = Data()
-    print(data.ts_data)
-    idx = data.tree.leaf_vector.astype(np.bool)
-    diff = data.ts_data[:, 0] - np.mean(data.ts_data[:, idx], axis=1)
+    print(data.tree.levels[1])
+    i = 203
+    print(data.ts_data[:, i])
+    idx = data.tree.leaf_matrix[i, :].astype(np.bool)
+    print(np.where(idx)[0])
+    diff = data.ts_data[:, i] - np.mean(data.ts_data[:, idx], axis=1)
     diff = np.abs(diff)
     print(np.sum(diff))
+
+    # idx = np.random.choice(np.where(idx)[0])
+    # print(idx)
+    # print(data.ts_data[:, idx])
+
     # print(data.ts_data.dtype, data.ts_data.shape)
 
-    # dataset = data.tf_dataset(True)
+    # dataset = data.tf_dataset(mode='test')
+    # for d in dataset:
+    #     sub_ts = d[1]
+    #     print(sub_ts)
+
     # for d in dataset:
     #     feats = d[0]
     #     y_obs = d[1]
