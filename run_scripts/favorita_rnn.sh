@@ -10,5 +10,4 @@ do
     --fixed_lstm_hidden=90 --node_emb_dim=1 \
     --batch_size=500 --train_epochs=30 --patience=10 --learning_rate=0.001 --num_changes=6 \
     --hist_len=28 --train_pred=28 --test_pred=7 --val_windows=5 --test_windows=5
-    # break  # Comment when running multiple expts
 done

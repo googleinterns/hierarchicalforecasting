@@ -54,15 +54,16 @@ class FixedRNN(keras.Model):
             self.decoders.append(decoder)
         
             output_layer = layers.Dense(1, use_bias=True)
-                # kernel_initializer=keras.initializers.RandomUniform(-0.5, 0.5))
             self.output_layers.append(output_layer)
-    
-    def get_transformed_emb(self):
-        embs = tf.exp(self.node_emb)
-        return embs
+        
+        if flags.local_model:
+            self.local_enc = layers.LSTM(flags.fixed_lstm_hidden,
+                                return_state=True, time_major=True)
+            self.local_dec = layers.LSTM(flags.fixed_lstm_hidden,
+                                return_sequences=True, time_major=True)
+            self.local_dense = layers.Dense(1, use_bias=True)
     
     def get_node_emb(self, nid):
-        # embs = self.get_transformed_emb()
         embs = self.node_emb
         # embs = tf.matmul(self.tree.ancestor_matrix, embs)
         node_emb = tf.nn.embedding_lookup(embs, nid)
@@ -77,24 +78,6 @@ class FixedRNN(keras.Model):
         all_feats = feats_emb + [feats_cont]  # [t x *]
         all_feats = tf.concat(all_feats, axis=-1)  # t x d
         return all_feats
-
-    # def l_p_norm_reg(self, p):
-    #     A = self.tree.adj_matrix  # n x n
-    #     A = np.expand_dims(A, axis=0)  # 1 x n x n
-
-    #     embs = self.get_transformed_emb()  # n x e
-    #     embs = tf.transpose(embs)  # e x n
-    #     emb_1 = tf.expand_dims(embs, axis=-1)  # e x n x 1
-    #     emb_2 = tf.expand_dims(embs, axis=-2)  # e x 1 x n
-        
-    #     edge_diff = emb_1 * A - emb_2 * A
-    #     if p==1:
-    #         edge_diff = tf.abs(edge_diff)  # L1 regularization
-    #     elif p==2:
-    #         edge_diff = edge_diff * edge_diff  # L2 regularization
-    #     reg = flags.reg_weight * tf.reduce_mean(edge_diff)
-
-    #     return reg
 
     def emb_regularizer(self):
         if flags.emb_reg_weight > 0:
@@ -143,6 +126,11 @@ class FixedRNN(keras.Model):
         else:
             return 0.0
 
+    def local_reg(self, loc_out):
+        if flags.loc_reg > 0:
+            reg = tf.reduce_sum(tf.square(loc_out))
+            return flags.loc_reg * reg
+
     @tf.function
     def call(self, feats, y_prev, nid):
         '''
@@ -175,9 +163,19 @@ class FixedRNN(keras.Model):
         outputs = tf.concat(outputs, axis=-1)  # t x b x h
         # outputs = tf.reduce_mean(outputs, axis=1, keepdims=True)  # t x 1 x h
 
-        fixed_effect = tf.reduce_sum(outputs * loadings, axis=-1)  # t x b
+        final_output = tf.reduce_sum(outputs * loadings, axis=-1)  # t x b
         # final_output = tf.math.softplus(final_output)  # n
-        return fixed_effect, outputs
+
+        if flags.local_model:
+            _, h, c = self.local_enc(inputs=enc_inp)  # b x h
+            loc_out = self.local_dec(inputs=feats_futr, initial_state=(h, c))  # t x b x h
+            loc_out = self.local_dense(loc_out)  # t x b x 1
+            loc_out = tf.squeeze(loc_out, axis=-1)  # t x b
+            final_output = final_output + loc_out
+        else:
+            loc_out = None
+
+        return final_output, outputs, loc_out
 
     @tf.function
     def train_step(self, feats, y_obs, nid, optimizer):
@@ -188,10 +186,11 @@ class FixedRNN(keras.Model):
         sw: b
         '''
         with tf.GradientTape() as tape:
-            pred, factors = self(feats, y_obs[:flags.hist_len], nid)  # t x 1
+            pred, factors, loc_out = self(feats, y_obs[:flags.hist_len], nid)  # t x 1
             mae = tf.abs(pred - y_obs[flags.hist_len:])  # t x 1
             mae = tf.reduce_mean(mae)
-            loss = mae + self.emb_regularizer() + self.factor_regularizer(factors)
+            loss = mae + self.emb_regularizer() + self.factor_regularizer(factors) \
+                + self.local_reg(loc_out)
 
         grads = tape.gradient(loss, self.trainable_variables)
         optimizer.apply_gradients(zip(grads, self.trainable_variables))
@@ -223,7 +222,7 @@ class FixedRNN(keras.Model):
             assert(y_obs.numpy().shape[0] == hist_len + pred_len)
             assert(feats[0].numpy().shape[0] == hist_len + pred_len)
 
-            y_pred, factors = self(feats, y_obs[:hist_len], nid)
+            y_pred, _, _ = self(feats, y_obs[:hist_len], nid)
             test_loss = tf.abs(y_pred - y_obs[hist_len:])  # t x 1
             test_loss = tf.reduce_mean(test_loss).numpy()
 

@@ -12,7 +12,7 @@ def main():
     start = 500
     for it in range(500):
         try:
-            with open(f'logs/{dataset}/hpo/metrics_{it}.pkl', 'rb') as fin:
+            with open(f'logs/{dataset}/hpo_local/metrics_{it}.pkl', 'rb') as fin:
                 df = pickle.load(fin)
         except FileNotFoundError:
             start = it
@@ -23,7 +23,8 @@ def main():
     for it in range(start, 500):
         batch_size = 500
         l2_act = 10 ** np.random.uniform(-10, -5)
-        l2_emb = 10 ** np.random.uniform(-6, -2)
+        l2_emb = 10 ** np.random.uniform(-5, 0)
+        l2_loc = 10 ** np.random.uniform(-10, -5)
         node_emb = 8
         ep = 40
         lr = 0.003
@@ -33,6 +34,7 @@ def main():
             "batch_size": batch_size,
             "l2_act": l2_act,
             "l2_emb": l2_emb,
+            "l2_loc": l2_loc,
             "node_emb": 8,
             "ep": ep,
             "lr": lr,
@@ -41,11 +43,12 @@ def main():
         }
         print(f'HPARAMS run {it}:', hparams)
 
-        shutil.rmtree(f'logs/{dataset}/hpo/run/', ignore_errors=True)
+        shutil.rmtree(f'logs/{dataset}/hpo_local/run/', ignore_errors=True)
         
-        cmd = ["python", "train.py", f"--expt=hpo/run/",
+        cmd = ["python", "train.py", f"--expt=hpo_local/run/",
             f"--random_seed=1", f"--dataset={dataset}",
             f"--act_reg_weight={l2_act}", f"--emb_reg_weight={l2_emb}",
+            "--local_model=True", f"--loc_reg={l2_loc}",
             f"--node_emb_dim={node_emb}", f"--fixed_lstm_hidden={lstm_hidden}",
             f"--batch_size={batch_size}", f"--train_epochs={ep}",
             f"--learning_rate={lr}", f"--num_changes=6", "--patience=10",
@@ -57,8 +60,11 @@ def main():
                 text=True
             )
         
-        shutil.copyfile(f'logs/{dataset}/hpo/run/metrics.pkl', f'logs/{dataset}/hpo/metrics_{it}.pkl')
-        with open(f'logs/{dataset}/hpo/params_{it}.pkl', 'wb') as fout:
+        shutil.copyfile(
+            f'logs/{dataset}/hpo_local/run/metrics.pkl',
+            f'logs/{dataset}/hpo_local/metrics_{it}.pkl'
+        )
+        with open(f'logs/{dataset}/hpo_local/params_{it}.pkl', 'wb') as fout:
             pickle.dump(cmd, fout)
 
 

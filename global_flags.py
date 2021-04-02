@@ -27,5 +27,9 @@ flags.DEFINE_float('emb_reg_weight', 0.0,
                    'Regularization weight for embeddings')
 flags.DEFINE_float('act_reg_weight', 0.0,
                    'Regularization weight for activations')
+flags.DEFINE_float('loc_reg', 0.0,
+                   'Regularization weight for the local model')
+
+flags.DEFINE_bool('local_model', False, 'Use local model')
 
 FLAGS = flags.FLAGS
