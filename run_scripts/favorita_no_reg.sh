@@ -25,3 +25,5 @@ do
     --hist_len=28 --train_pred=28 --test_pred=7 --val_windows=5 --test_windows=5
     # break  # Comment when running multiple expts
 done
+
+# change num_changes to 6 for favorita
