@@ -130,6 +130,8 @@ class FixedRNN(keras.Model):
         if flags.loc_reg > 0:
             reg = tf.reduce_sum(tf.square(loc_out))
             return flags.loc_reg * reg
+        
+        return 0.0
 
     @tf.function
     def call(self, feats, y_prev, nid):

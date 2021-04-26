@@ -123,17 +123,14 @@ def main(_):
 
         summary.write(step=step.numpy())
 
-    print(f'Best model at {best_check_path} with loss = {best_loss}')
+        '''Save embeddings to file'''
+        emb = model.get_node_emb(np.arange(data.num_ts))
+        emb = emb.numpy()
+        fname = os.path.join(expt_dir, 'emb.pkl')
+        with open(fname, 'wb') as fout:
+            pickle.dump(emb, fout)
 
-    '''Save embeddings to file'''
-    # emb = model.get_node_emb(np.arange(data.num_ts))
-    # emb = emb.numpy()
-    # h = flags.hierarchy
-    # if h is None:
-    #     h = ""
-    # fname = f'scratch/emb_{h}.pkl'
-    # with open(fname, 'wb') as fout:
-    #     pickle.dump(emb, fout)
+    print(f'Best model at {best_check_path} with loss = {best_loss}')
 
 
 class Summary:
