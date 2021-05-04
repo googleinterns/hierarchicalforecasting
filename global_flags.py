@@ -20,6 +20,7 @@ flags.DEFINE_integer('node_emb_dim', 16,
 flags.DEFINE_integer('random_seed', None,
                     'The random seed to be used for TF and numpy')
 flags.DEFINE_integer("patience", 5, "Patience for early stopping")
+flags.DEFINE_integer("num_changes", 6, "Number of decay steps")
 
 flags.DEFINE_float('learning_rate', 0.001,
                    'Learning rate')
