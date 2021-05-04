@@ -21,23 +21,19 @@ class FixedRNN(keras.Model):
 
         self.num_ts = num_ts
         self.cat_dims = cat_dims
-        
-        self.tree = tree
 
-        # init_mat = np.random.normal(size=[self.num_ts, flags.node_emb_dim]).astype(np.float32)
-        
-        init_mat = np.random.normal(size=[self.num_ts, flags.node_emb_dim]).astype(np.float32) * 0.1
+        self.tree = tree
+        init_mat = self.tree.init_emb.astype(np.float32)
         init_mat = self.tree.ancestor_matrix @ init_mat
 
-        self.node_emb = tf.Variable(
-            init_mat,
-            name='node_emb'
-        )
-        
-        cat_emb_dims = [min(MAX_FEAT_EMB_DIM, (dim+1)//2) for dim in self.cat_dims]
-        print('Cat feat emb dims:', cat_emb_dims)
+        self.node_emb = tf.Variable(init_mat, name='node_emb')
+
+        cat_emb_dims = [
+            min(MAX_FEAT_EMB_DIM, (dim + 1) // 2) for dim in self.cat_dims
+        ]
+        print('Cat feat emb dims: %s', cat_emb_dims)
         self.cat_feat_embs = [
-            layers.Embedding(input_dim=idim, output_dim=odim) \
+            layers.Embedding(input_dim=idim, output_dim=odim)
             for idim, odim in zip(self.cat_dims, cat_emb_dims)
         ]
 
@@ -153,7 +149,10 @@ class FixedRNN(keras.Model):
 
         enc_inp = tf.concat([y_prev, feats_prev], axis=-1)  # t/2 x b x D'
 
-        loadings = tf.expand_dims(node_emb, 0)  # 1 x b x h
+        if flags.node_emb_dim == 1:
+            loadings = 1.0
+        else:
+            loadings = tf.expand_dims(node_emb, 0)  # 1 x b x h
 
         outputs = []
         for e, d, o in zip(self.encoders, self.decoders, self.output_layers):

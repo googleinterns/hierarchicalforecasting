@@ -7,14 +7,29 @@ import global_flags
 
 from absl import app
 from tqdm import tqdm
-from sklearn.preprocessing import OrdinalEncoder, minmax_scale, StandardScaler
 
 flags = global_flags.FLAGS
+
+class StandardScaler:
+    """
+    Standard the input
+    """
+
+    def __init__(self, mean, std):
+        self.mean = mean
+        self.std = std
+
+    def transform(self, data):
+        return (data - self.mean) / self.std
+
+    def inverse_transform(self, data):
+        return (data * self.std) + self.mean
 
 class Data:
     def __init__(self):
         self.read_data()
         self.transform_data()
+        self.compute_emb_matrix()
         # self.compute_weights()
 
     def read_data(self):
@@ -34,14 +49,34 @@ class Data:
         self.w /= len(levels)
         assert(np.abs(np.sum(self.w) - 1.0) <= 1e-5)
 
+    def compute_emb_matrix(self):
+        """Create scaled embedding matrix."""
+        tot_len = self.T
+        num_data = tot_len - (flags.val_windows + flags.test_windows
+                            ) * flags.test_pred - 2 * flags.hist_len
+        yts = self.ts_data.transpose()[:, 0:num_data]
+        mu = np.mean(yts, axis=1)
+        sig = np.std(yts, axis=1)
+        init_emb = np.random.normal(size=[self.num_ts, flags.node_emb_dim]).astype(
+            np.float32)
+        init_emb = init_emb * sig[:, None] + mu[:, None]
+        self.tree.init_emb = init_emb
+
     def transform_data(self):
-        # Compute the mean of each node
+        """Compute the mean of each node."""
+        tot_len = self.T
+        num_data = tot_len - (flags.val_windows + flags.test_windows
+                            ) * flags.test_pred - 2 * flags.hist_len
         leaf_mat = self.tree.leaf_matrix.T
         num_leaf = np.sum(leaf_mat, axis=0, keepdims=True)
         self.ts_data = self.ts_data / num_leaf
-    
+
+        yts = self.ts_data.transpose()[:, 0:num_data]
+        self.scalar = StandardScaler(mean=yts.mean(), std=yts.std())
+        self.ts_data = self.scalar.transform(self.ts_data)
+
     def inverse_transform(self, pred):
-        return pred
+        return self.scalar.inverse_transform(pred)
 
     def train_gen(self):
         hist_len = flags.hist_len
