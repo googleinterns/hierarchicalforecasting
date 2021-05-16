@@ -1,3 +1,4 @@
+import sys
 import numpy as np
 import pickle
 import tensorflow as tf
@@ -145,10 +146,11 @@ def main(_):
         tree, ts_data, _ = pickle.load(fin)
 
     num_val = int(y_pred.shape[0] * 0.2)
-    print('*' * 10, 'num_val', num_val)
     
     train_pred, train_true = y_pred[:-num_val], y_true[:-num_val]
-    val_pred, val_true = y_pred[num_val:], y_true[num_val:]
+    val_pred, val_true = y_pred[-num_val:], y_true[-num_val:]
+
+    print('*' * 10, 'Train', train_pred.shape, 'Val', val_pred.shape)
     
     leaf_mat = tree.leaf_matrix
     num_leaf = np.sum(leaf_mat, axis=1, keepdims=True)
@@ -164,7 +166,7 @@ def main(_):
     # print(p_matrix)
     # print(reg_mat)
 
-    print('Diff', np.sum(p_matrix - reg_mat))
+    print('Diff', np.sum(np.abs(p_matrix - reg_mat)))
 
     print('### Train')
     train_rec = (train_pred @ p_matrix) @ sub_mat.T

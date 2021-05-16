@@ -1,6 +1,7 @@
 import numpy as np
 import pandas as pd
 from tree import Tree
+from sklearn.preprocessing import minmax_scale
 
 import pickle
 
@@ -35,6 +36,7 @@ def main():
     _, t = raw_data.shape
     feats = np.arange(t)
     feats = np.vstack([feats, feats % 7]).T
+    feats = minmax_scale(feats)
 
     print('feats', feats.shape)
 
