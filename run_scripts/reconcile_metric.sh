@@ -4,7 +4,7 @@ for i in {1..10}
 do
     CUDA_VISIBLE_DEVICES='2' python reconcile.py \
     --dir=logs/favorita/hid_64_exp_1_norm/run_${i} \
-    --dataset=favorita --lamda=500.0
+    --dataset=favorita --lamda=100.0
 done
 
 # for i in {1..10}
