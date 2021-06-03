@@ -24,5 +24,7 @@ flags.DEFINE_integer("num_changes", 6, "Number of decay steps")
 
 flags.DEFINE_float('learning_rate', 0.001,
                    'Learning rate')
+flags.DEFINE_float('emb_reg_weight', 0.0,
+                   'Embedding regularization weight')
 
 FLAGS = flags.FLAGS

@@ -62,6 +62,29 @@ class FixedRNN(keras.Model):
         all_feats = feats_emb + [feats_cont]  # [t x *]
         all_feats = tf.concat(all_feats, axis=-1)  # t x d
         return all_feats
+    
+    def emb_regularizer(self):
+        if flags.emb_reg_weight > 0:
+            ''' Leaves close to each embedding '''
+            leaf_mat = self.tree.leaf_matrix
+            leaf_vector = self.tree.leaf_vector
+            reg = 0.0
+
+            for i in range(len(leaf_vector)):
+                if leaf_vector[i] < 0.5:
+                    leaves = leaf_mat[i]
+                    idx = np.where(leaves > 0.5)[0]
+                    
+                    embA = self.get_node_emb(np.array([i]))  # 1 x d
+                    sub_emb = self.get_node_emb(idx)  # l x d
+                    diff = tf.square(embA - sub_emb)  # l x d
+                    sub_reg = tf.reduce_sum(diff, axis=1)  # l
+                    sub_reg = tf.reduce_mean(diff)
+                    reg += sub_reg
+            
+            return reg * flags.emb_reg_weight
+
+        return 0.0
 
     @tf.function
     def call(self, feats, y_prev, nid):
@@ -103,7 +126,7 @@ class FixedRNN(keras.Model):
         with tf.GradientTape() as tape:
             pred = self(feats, y_obs[:flags.hist_len], nid)  # t x 1
             mae = tf.abs(pred - y_obs[flags.hist_len:])  # t x 1
-            loss = tf.reduce_mean(mae)
+            loss = tf.reduce_mean(mae) + self.emb_regularizer()
 
         grads = tape.gradient(loss, self.trainable_variables)
         optimizer.apply_gradients(zip(grads, self.trainable_variables))
