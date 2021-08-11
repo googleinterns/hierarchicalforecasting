@@ -62,9 +62,17 @@ def main(_):
     
     summary = Summary(expt_dir)
 
-    model.eval(data, 'val')
-    model.eval(data, 'test')
-    # sys.exit()
+    _, _, factors_val = model.eval(data, 'val')
+    _, _, factors_test = model.eval(data, 'test')
+    
+    save_path = os.path.join(expt_dir, 'val_factors.pkl')
+    with open(save_path, 'wb') as fout:
+        pickle.dump(factors_val, fout)
+    save_path = os.path.join(expt_dir, 'test_factors.pkl')
+    with open(save_path, 'wb') as fout:
+        pickle.dump(factors_test, fout)
+    
+    sys.exit()
     # print(eval_df.loc['mean']['wape'])
     # summary.update(eval_dict)
     # summary.write(step=step.numpy())

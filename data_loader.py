@@ -88,6 +88,9 @@ class Data:
                 - 2 * flags.hist_len
         perm = np.random.permutation(num_data)
 
+        print('Train')
+        print('Data start:', 0, 'Data end:', num_data + 2*flags.hist_len)
+
         # weights = self.w * (self.num_ts / flags.batch_size)
 
         for i in perm:
@@ -111,6 +114,10 @@ class Data:
             tot_len - (flags.val_windows + flags.test_windows) * flags.test_pred \
                 - flags.hist_len
         end_idx = tot_len - (flags.test_windows + 1) * flags.test_pred - flags.hist_len
+
+        print('Val')
+        print('Data start:', start_idx + flags.hist_len, 'Data end:', end_idx + flags.hist_len + flags.test_pred)
+
         for i in range(start_idx, end_idx+1, pred_len):
             sub_ts = self.ts_data[i:i+hist_len+pred_len]
             sub_feat_cont = self.global_cont_feats[i:i+hist_len+pred_len]
@@ -129,6 +136,9 @@ class Data:
             tot_len - flags.test_windows * flags.test_pred \
                 - flags.hist_len
         end_idx = tot_len - flags.test_pred - flags.hist_len
+
+        print('Test')
+        print('Data start:', start_idx + flags.hist_len, 'Data end:', end_idx + flags.hist_len + flags.test_pred)
 
         for i in range(start_idx, end_idx+1, pred_len):
             sub_ts = self.ts_data[i:i+hist_len+pred_len]
@@ -162,11 +172,15 @@ class Data:
 
 def main(_):
     data = Data()
-    print(data.ts_data)
-    idx = data.tree.leaf_vector.astype(np.bool)
-    diff = data.ts_data[:, 0] - np.mean(data.ts_data[:, idx], axis=1)
-    diff = np.abs(diff)
-    print(np.sum(diff))
+    for m in ['train', 'val', 'test']:
+        dataset = data.tf_dataset(m)
+        for d in dataset:
+            break
+    # print(data.ts_data)
+    # idx = data.tree.leaf_vector.astype(np.bool)
+    # diff = data.ts_data[:, 0] - np.mean(data.ts_data[:, idx], axis=1)
+    # diff = np.abs(diff)
+    # print(np.sum(diff))
     # print(data.ts_data.dtype, data.ts_data.shape)
 
     # dataset = data.tf_dataset(True)

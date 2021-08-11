@@ -5,7 +5,7 @@ do
     echo
     echo "RUN ${i}"
     echo
-    CUDA_VISIBLE_DEVICES="2" python train.py \
+    CUDA_VISIBLE_DEVICES="1" python train.py \
     --expt=hid_20_exp_8_norm/run_${i} --dataset='favorita' --random_seed=${i} \
     --fixed_lstm_hidden=20 --node_emb_dim=8 --local_model=True \
     --batch_size=500 --train_epochs=40 --patience=10 --learning_rate=0.01 --num_changes=6 \

@@ -219,11 +219,13 @@ class FixedRNN(keras.Model):
                 return B
             return np.concatenate((A, B), axis=0)
 
+        all_factors = []
+
         for feats, y_obs, nid in iterator:
             assert(y_obs.numpy().shape[0] == hist_len + pred_len)
             assert(feats[0].numpy().shape[0] == hist_len + pred_len)
 
-            y_pred, _, _ = self(feats, y_obs[:hist_len], nid)
+            y_pred, factors, _ = self(feats, y_obs[:hist_len], nid)
             test_loss = tf.abs(y_pred - y_obs[hist_len:])  # t x 1
             test_loss = tf.reduce_mean(test_loss).numpy()
 
@@ -236,6 +238,8 @@ class FixedRNN(keras.Model):
 
             all_y_pred = set_or_concat(all_y_pred, y_pred)
             all_y_true = set_or_concat(all_y_true, y_true)
+
+            all_factors.append(factors.numpy())
 
         results_list = []
 
@@ -274,7 +278,7 @@ class FixedRNN(keras.Model):
         print(tabulate(df, headers='keys', tablefmt='psql'))
         print(f'Loss: {test_loss}')
 
-        return df, (all_y_pred, all_y_true)
+        return df, (all_y_pred, all_y_true), all_factors
 
 
 def mape(y_pred, y_true):
