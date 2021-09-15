@@ -37,31 +37,21 @@ class FixedRNN(keras.Model):
             for idim, odim in zip(self.cat_dims, cat_emb_dims)
         ]
 
-        self.encoders = []
-        self.decoders = []
-        self.output_layers = []
+        self.ar_encoder = layers.LSTM(flags.fixed_lstm_hidden,
+                            return_state=True, time_major=True)
+        self.ar_decoder = layers.LSTM(flags.fixed_lstm_hidden,
+                            return_sequences=True, time_major=True)
+        self.ar_output = layers.Dense(flags.hist_len, use_bias=True)
 
-        for i in range(flags.node_emb_dim):
-            encoder = layers.LSTM(flags.fixed_lstm_hidden,
-                                return_state=True, time_major=True)
-            decoder = layers.LSTM(flags.fixed_lstm_hidden,
-                                return_sequences=True, time_major=True)
-            self.encoders.append(encoder)
-            self.decoders.append(decoder)
-        
-            output_layer = layers.Dense(1, use_bias=True)
-            self.output_layers.append(output_layer)
-        
-        if flags.local_model:
-            self.local_enc = layers.LSTM(flags.fixed_lstm_hidden,
-                                return_state=True, time_major=True)
-            self.local_dec = layers.LSTM(flags.fixed_lstm_hidden,
-                                return_sequences=True, time_major=True)
-            self.local_dense = layers.Dense(1, use_bias=True)
-    
+        self.emb_encoder = layers.LSTM(flags.fixed_lstm_hidden,
+                            return_state=True, time_major=True)
+        self.emb_decoder = layers.LSTM(flags.fixed_lstm_hidden,
+                            return_sequences=True, time_major=True)
+        self.emb_output = layers.Dense(flags.node_emb_dim, use_bias=True)
+
+
     def get_node_emb(self, nid):
         embs = self.node_emb
-        # embs = tf.matmul(self.tree.ancestor_matrix, embs)
         node_emb = tf.nn.embedding_lookup(embs, nid)
         return node_emb
 
@@ -107,79 +97,45 @@ class FixedRNN(keras.Model):
             return reg * flags.emb_reg_weight
 
         return 0.0
-    
-    def factor_regularizer(self, factors):
-        ''' factors t x b x h '''
-        if flags.act_reg_weight > 0:
-            print('Activation regularization True')
-            factors = tf.transpose(factors, [1, 0, 2])  # b x t x h
-            shuffled = tf.gather(
-                factors,
-                tf.random.shuffle(tf.range(flags.batch_size))
-            )
-            reg = tf.reduce_sum(tf.square(factors - shuffled))
-            return flags.act_reg_weight * reg
-        else:
-            return 0.0
-
-    def local_reg(self, loc_out):
-        if flags.loc_reg > 0:
-            reg = tf.reduce_sum(tf.square(loc_out))
-            return flags.loc_reg * reg
-        
-        return 0.0
 
     @tf.function
-    def call(self, feats, y_prev, nid):
+    def call(self, feats, y_prev, z, nid):
         '''
         feats: t x d, t
-        y_prev: t x b
+        y_prev: t/2 x b
+        z: t/2 x r
         nid: b
         sw: b
         '''
         feats = self.assemble_feats(feats)  # t x d
-        y_prev = tf.expand_dims(y_prev, -1)  # t/2 x b x 1
-        node_emb = self.get_node_emb(nid)  # b x h
-        
         feats = tf.expand_dims(feats, 1)  # t x 1 x d
-        feats = tf.repeat(feats, repeats=nid.shape[0], axis=1)  # t x b x d
+        node_emb = self.get_node_emb(nid)  # b x e
+        
+        feats_prev = feats[:flags.hist_len]  # t/2 x 1 x d
+        feats_futr = feats[flags.hist_len:]  # t/2 x 1 x d
 
-        feats_prev = feats[:flags.hist_len]  # t/2 x b x d
-        feats_futr = feats[flags.hist_len:]  # t/2 x b x d
+        z = tf.expand_dims(z, 1)  # t/2 x 1 x r
+        feats_prev = tf.concat([feats_prev, z], axis=-1)  # t x d
+        _, h, c = self.ar_encoder(inputs=feats_prev)  # 1 x h
+        ar = self.ar_decoder(inputs=feats_futr, initial_state=(h, c))  # t/2 x 1 x h
+        ar = self.ar_output(ar)  # t/2 x 1 x t/2
 
-        enc_inp = tf.concat([y_prev, feats_prev], axis=-1)  # t/2 x b x D'
+        ar = tf.squeeze(ar, axis=1)  # t/2 x t/2
+        ar = tf.matmul(ar, y_prev)  # t/2 x b
 
-        if flags.node_emb_dim == 1:
-            loadings = 1.0
-        else:
-            loadings = tf.expand_dims(node_emb, 0)  # 1 x b x h
+        _, h, c = self.emb_encoder(inputs=feats_prev)  # 1 x h
+        ew = self.emb_decoder(inputs=feats_futr, initial_state=(h, c))  # t/2 x 1 x h
+        ew = self.emb_output(ew)  # t/2 x 1 x e
+        ew = tf.squeeze(ew, axis=1)  # t/2 x e
+        ew = tf.nn.tanh(ew)
+        ew = tf.matmul(ew, node_emb, transpose_b=True)  # t/2 x b
 
-        outputs = []
-        for e, d, o in zip(self.encoders, self.decoders, self.output_layers):
-            _, h, c = e(inputs=enc_inp)  # b x h
-            output = d(inputs=feats_futr, initial_state=(h, c))  # t x b x h
-            output = o(output)  # t x b x 1
-            outputs.append(output)
+        final_output = ar + ew
 
-        outputs = tf.concat(outputs, axis=-1)  # t x b x h
-        # outputs = tf.reduce_mean(outputs, axis=1, keepdims=True)  # t x 1 x h
-
-        final_output = tf.reduce_sum(outputs * loadings, axis=-1)  # t x b
-        # final_output = tf.math.softplus(final_output)  # n
-
-        if flags.local_model:
-            _, h, c = self.local_enc(inputs=enc_inp)  # b x h
-            loc_out = self.local_dec(inputs=feats_futr, initial_state=(h, c))  # t x b x h
-            loc_out = self.local_dense(loc_out)  # t x b x 1
-            loc_out = tf.squeeze(loc_out, axis=-1)  # t x b
-            final_output = final_output + loc_out
-        else:
-            loc_out = None
-
-        return final_output, outputs, loc_out
+        return final_output
 
     @tf.function
-    def train_step(self, feats, y_obs, nid, optimizer):
+    def train_step(self, feats, y_obs, z, nid, optimizer):
         '''
         feats:  b x t x d, b x t
         y_obs:  b x t
@@ -187,11 +143,10 @@ class FixedRNN(keras.Model):
         sw: b
         '''
         with tf.GradientTape() as tape:
-            pred, factors, loc_out = self(feats, y_obs[:flags.hist_len], nid)  # t x 1
+            pred = self(feats, y_obs[:flags.hist_len], z, nid)  # t x 1
             mae = tf.abs(pred - y_obs[flags.hist_len:])  # t x 1
             mae = tf.reduce_mean(mae)
-            loss = mae + self.emb_regularizer() + self.factor_regularizer(factors) \
-                + self.local_reg(loc_out)
+            loss = mae + self.emb_regularizer()
 
         grads = tape.gradient(loss, self.trainable_variables)
         optimizer.apply_gradients(zip(grads, self.trainable_variables))
@@ -219,13 +174,11 @@ class FixedRNN(keras.Model):
                 return B
             return np.concatenate((A, B), axis=0)
 
-        all_factors = []
-
-        for feats, y_obs, nid in iterator:
+        for feats, y_obs, z, nid in iterator:
             assert(y_obs.numpy().shape[0] == hist_len + pred_len)
             assert(feats[0].numpy().shape[0] == hist_len + pred_len)
 
-            y_pred, factors, _ = self(feats, y_obs[:hist_len], nid)
+            y_pred = self(feats, y_obs[:hist_len], z, nid)
             test_loss = tf.abs(y_pred - y_obs[hist_len:])  # t x 1
             test_loss = tf.reduce_mean(test_loss).numpy()
 
@@ -238,8 +191,6 @@ class FixedRNN(keras.Model):
 
             all_y_pred = set_or_concat(all_y_pred, y_pred)
             all_y_true = set_or_concat(all_y_true, y_true)
-
-            all_factors.append(factors.numpy())
 
         results_list = []
 
@@ -278,7 +229,7 @@ class FixedRNN(keras.Model):
         print(tabulate(df, headers='keys', tablefmt='psql'))
         print(f'Loss: {test_loss}')
 
-        return df, (all_y_pred, all_y_true), all_factors
+        return df, (all_y_pred, all_y_true)
 
 
 def mape(y_pred, y_true):

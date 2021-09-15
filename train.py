@@ -62,17 +62,9 @@ def main(_):
     
     summary = Summary(expt_dir)
 
-    _, _, factors_val = model.eval(data, 'val')
-    _, _, factors_test = model.eval(data, 'test')
+    model.eval(data, 'val')
+    model.eval(data, 'test')
     
-    save_path = os.path.join(expt_dir, 'val_factors.pkl')
-    with open(save_path, 'wb') as fout:
-        pickle.dump(factors_val, fout)
-    save_path = os.path.join(expt_dir, 'test_factors.pkl')
-    with open(save_path, 'wb') as fout:
-        pickle.dump(factors_test, fout)
-    
-    sys.exit()
     # print(eval_df.loc['mean']['wape'])
     # summary.update(eval_dict)
     # summary.write(step=step.numpy())
@@ -88,8 +80,8 @@ def main(_):
         optimizer.learning_rate.assign(sch(step))
 
         iterator = tqdm(data.tf_dataset(mode='train'), mininterval=2)
-        for i, (feats, y_obs, nid) in enumerate(iterator):
-            reg_loss, loss = model.train_step(feats, y_obs, nid, optimizer)
+        for i, (feats, y_obs, z, nid) in enumerate(iterator):
+            reg_loss, loss = model.train_step(feats, y_obs, z, nid, optimizer)
             '''Train metrics'''
             summary.update({"train/reg_loss": reg_loss, "train/loss": loss})
             if i % 100 == 0:

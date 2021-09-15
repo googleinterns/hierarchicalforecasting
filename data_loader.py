@@ -30,6 +30,7 @@ class Data:
         self.read_data()
         self.transform_data()
         self.compute_emb_matrix()
+        self.compute_nmf()
         # self.compute_weights()
 
     def read_data(self):
@@ -65,18 +66,50 @@ class Data:
     def transform_data(self):
         """Compute the mean of each node."""
         tot_len = self.T
-        num_data = tot_len - (flags.val_windows + flags.test_windows
-                            ) * flags.test_pred - 2 * flags.hist_len
+        num_data = tot_len - (flags.val_windows + flags.test_windows - 1
+                            ) * flags.test_pred - flags.hist_len
         leaf_mat = self.tree.leaf_matrix.T
         num_leaf = np.sum(leaf_mat, axis=0, keepdims=True)
         self.ts_data = self.ts_data / num_leaf
 
-        yts = self.ts_data.transpose()[:, 0:num_data]
+        yts = self.ts_data.transpose()[:, :num_data]
         self.scalar = StandardScaler(mean=yts.mean(), std=yts.std())
         self.ts_data = self.scalar.transform(self.ts_data)
 
     def inverse_transform(self, pred):
         return self.scalar.inverse_transform(pred)
+    
+    def compute_nmf(self):
+
+        #def fast_recursive_nmf(ymat: np.array, r: int):
+        """Fast recursive NMF.
+
+        Args:
+            ymat: m X n matrix, need to find extreme columns for NMF
+            r: rank of NMF
+
+        Returns:
+            A three tuple (tall factor, short factor, id's of columns selected).
+        """
+        norm_mat = self.ts_data.copy()
+        num_data = self.T - (flags.val_windows + flags.test_windows - 1
+                            ) * flags.test_pred - flags.hist_len
+        norm_mat = norm_mat[:num_data]
+        norm_mat = norm_mat / np.sum(norm_mat, axis=0, keepdims=True)
+
+        self.nmf_cols = []
+        m = norm_mat.shape[0]
+
+        for _ in range(flags.nmf_rank):
+            l2_norms = np.linalg.norm(norm_mat, axis=0)
+            jmax = np.argmax(l2_norms)
+            self.nmf_cols.append(jmax)
+            pro_mat = np.eye(m) - np.dot(
+                norm_mat[:, [jmax]], norm_mat[:, [jmax]].transpose()) / np.square(l2_norms[jmax])
+            norm_mat = np.dot(pro_mat, norm_mat)
+        self.nmf_ts = self.ts_data[:, self.nmf_cols]
+        print('*' * 10, 'Selected columns from NMF', self.nmf_cols)
+        # amat = np.linalg.lstsq(wmat, self.ts_data)[0]
 
     def train_gen(self):
         hist_len = flags.hist_len
@@ -103,7 +136,8 @@ class Data:
             j = np.random.choice(range(self.num_ts), size=flags.batch_size)
             # j = np.random.permutation(3060)
             sub_ts = self.ts_data[i:i+hist_len+pred_len, j]
-            yield (sub_feat_cont, sub_feat_cat), sub_ts, j  # t x *
+            nmf_ts = self.nmf_ts[i:i+hist_len]
+            yield (sub_feat_cont, sub_feat_cat), sub_ts, nmf_ts, j  # t x *
 
     def val_gen(self):
         hist_len = flags.hist_len
@@ -120,12 +154,13 @@ class Data:
 
         for i in range(start_idx, end_idx+1, pred_len):
             sub_ts = self.ts_data[i:i+hist_len+pred_len]
+            nmf_ts = self.nmf_ts[i:i+hist_len]
             sub_feat_cont = self.global_cont_feats[i:i+hist_len+pred_len]
             sub_feat_cat = tuple(
                 feat[i:i+hist_len+pred_len] for feat in self.global_cat_feats
             )
             j = np.arange(self.num_ts)
-            yield (sub_feat_cont, sub_feat_cat), sub_ts, j  # t x *
+            yield (sub_feat_cont, sub_feat_cat), sub_ts, nmf_ts, j  # t x *
     
     def test_gen(self):
         hist_len = flags.hist_len
@@ -142,12 +177,13 @@ class Data:
 
         for i in range(start_idx, end_idx+1, pred_len):
             sub_ts = self.ts_data[i:i+hist_len+pred_len]
+            nmf_ts = self.nmf_ts[i:i+hist_len]
             sub_feat_cont = self.global_cont_feats[i:i+hist_len+pred_len]
             sub_feat_cat = tuple(
                 feat[i:i+hist_len+pred_len] for feat in self.global_cat_feats
             )
             j = np.arange(self.num_ts)
-            yield (sub_feat_cont, sub_feat_cat), sub_ts, j  # t x *
+            yield (sub_feat_cont, sub_feat_cat), sub_ts, nmf_ts, j  # t x *
 
     def tf_dataset(self, mode):
         if mode == 'train':
@@ -164,6 +200,7 @@ class Data:
             (
                 (tf.float32, output_type),  # feats
                 tf.float32,  # y_obs
+                tf.float32,  # nmf_ts
                 tf.int32,  # id
             )
         )
