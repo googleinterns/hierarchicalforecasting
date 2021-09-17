@@ -5,9 +5,11 @@ do
     echo
     echo "RUN ${i}"
     echo
-    CUDA_VISIBLE_DEVICES="1" python train.py \
-    --expt=hid_64_emb_10_timear/run_${i} --dataset='favorita' --random_seed=${i} \
-    --fixed_lstm_hidden=20 --node_emb_dim=8 --emb_reg_weight=4.921e-4 \
-    --batch_size=500 --train_epochs=40 --patience=10 --learning_rate=0.01287 --num_changes=6 \
+    CUDA_VISIBLE_DEVICES="3" python train.py \
+    --expt=hid_64_emb_8_timear/run_${i} --dataset='favorita' --random_seed=${i} \
+    --fixed_lstm_hidden=56 --node_emb_dim=4 --emb_reg_weight=1.55492e-4 \
+    --batch_size=512 --train_epochs=40 --patience=10 --learning_rate=0.01 --num_changes=6 \
     --hist_len=28 --train_pred=7 --test_pred=7 --val_windows=5 --test_windows=5
 done
+
+# (24, 16), (45, 8), (56, 4)
