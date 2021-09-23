@@ -31,7 +31,7 @@ class FixedRNN(keras.Model):
         cat_emb_dims = [
             min(MAX_FEAT_EMB_DIM, (dim + 1) // 2) for dim in self.cat_dims
         ]
-        print('Cat feat emb dims: %s', cat_emb_dims)
+        print('Cat feat emb dims:', cat_emb_dims)
         self.cat_feat_embs = [
             layers.Embedding(input_dim=idim, output_dim=odim)
             for idim, odim in zip(self.cat_dims, cat_emb_dims)
@@ -39,15 +39,35 @@ class FixedRNN(keras.Model):
 
         self.ar_encoder = layers.LSTM(flags.fixed_lstm_hidden,
                             return_state=True, time_major=True)
-        self.ar_decoder = layers.LSTM(flags.fixed_lstm_hidden,
-                            return_sequences=True, time_major=True)
-        self.ar_output = layers.Dense(flags.hist_len, use_bias=True)
-
+        # self.ar_decoder = layers.LSTM(flags.fixed_lstm_hidden,
+        #                     return_sequences=True, time_major=True)
+        # self.ar_output = layers.Dense(flags.hist_len, use_bias=True)
+        self.ar_w = None
+        self.ar_b = None
+        
         self.emb_encoder = layers.LSTM(flags.fixed_lstm_hidden,
                             return_state=True, time_major=True)
         self.emb_decoder = layers.LSTM(flags.fixed_lstm_hidden,
                             return_sequences=True, time_major=True)
         self.emb_output = layers.Dense(flags.node_emb_dim, use_bias=True)
+
+
+    def multi_head_dense(self, input, output_size):
+        
+        if self.ar_w is None:
+            fin = input.shape[-1]
+            fout = output_size
+            bsize = input.shape[0]
+            scale = 1.0 / max(1., (fin + fout) / 2.)
+            limit = np.sqrt(3.0 * scale)
+            self.ar_w = tf.Variable(
+                np.random.uniform(-limit, limit, size=(bsize, fin, fout)).astype(np.float32),
+                name='ar_w')
+            self.ar_b = tf.Variable(np.zeros((bsize, fout), dtype=np.float32), name='ar_b')
+        
+        output = tf.matmul(input, self.ar_w)
+        output = tf.squeeze(output, 1) + self.ar_b
+        return output
 
 
     def get_node_emb(self, nid):
@@ -108,20 +128,28 @@ class FixedRNN(keras.Model):
         sw: b
         '''
         feats = self.assemble_feats(feats)  # t x d
-        feats = tf.expand_dims(feats, 1)  # t x 1 x d
+        feats = tf.expand_dims(feats, axis=1)  # t/2 x 1 x d
         node_emb = self.get_node_emb(nid)  # b x e
         
         feats_prev = feats[:flags.hist_len]  # t/2 x 1 x d
         feats_futr = feats[flags.hist_len:]  # t/2 x 1 x d
 
         z = tf.expand_dims(z, 1)  # t/2 x 1 x r
-        feats_prev = tf.concat([feats_prev, z], axis=-1)  # t x d
+        feats_prev = tf.concat([feats_prev, z], axis=-1)  # t/2 x 1 x d
         _, h, c = self.ar_encoder(inputs=feats_prev)  # 1 x h
-        ar = self.ar_decoder(inputs=feats_futr, initial_state=(h, c))  # t/2 x 1 x h
-        ar = self.ar_output(ar)  # t/2 x 1 x t/2
+        enc = tf.concat([h, c], axis=-1)  # 1 x h
+        enc = tf.repeat(enc, flags.pred_len, axis=0)  # t/2 x h
+        enc = tf.expand_dims(enc, 1)  # t/2 x 1 x h
+        enc = tf.concat([feats_futr, enc], axis=-1)  # t/2 x 1 x d
+        
+        ar = self.multi_head_dense(enc, flags.hist_len)  # t/2 x t/2
+        ar = tf.matmul(ar, y_prev)
 
-        ar = tf.squeeze(ar, axis=1)  # t/2 x t/2
-        ar = tf.matmul(ar, y_prev)  # t/2 x b
+        # ar = self.ar_decoder(inputs=feats_futr, initial_state=(h, c))  # t/2 x 1 x h
+        # ar = self.ar_output(ar)  # t/2 x 1 x t/2
+
+        # ar = tf.squeeze(ar, axis=1)  # t/2 x t/2
+        # ar = tf.matmul(ar, y_prev)  # t/2 x b
 
         _, h, c = self.emb_encoder(inputs=feats_prev)  # 1 x h
         ew = self.emb_decoder(inputs=feats_futr, initial_state=(h, c))  # t/2 x 1 x h
@@ -164,7 +192,7 @@ class FixedRNN(keras.Model):
         iterator = data.tf_dataset(mode=mode)
         level_dict = data.tree.levels
         hist_len = flags.hist_len
-        pred_len = flags.test_pred
+        pred_len = flags.pred_len
 
         all_y_true = None
         all_y_pred = None

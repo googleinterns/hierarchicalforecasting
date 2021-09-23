@@ -54,7 +54,7 @@ class Data:
         """Create scaled embedding matrix."""
         tot_len = self.T
         num_data = tot_len - (flags.val_windows + flags.test_windows
-                            ) * flags.test_pred - 2 * flags.hist_len
+                            ) * flags.pred_len - 2 * flags.hist_len
         yts = self.ts_data.transpose()[:, 0:num_data]
         mu = np.mean(yts, axis=1)
         sig = np.std(yts, axis=1)
@@ -67,7 +67,7 @@ class Data:
         """Compute the mean of each node."""
         tot_len = self.T
         num_data = tot_len - (flags.val_windows + flags.test_windows - 1
-                            ) * flags.test_pred - flags.hist_len
+                            ) * flags.pred_len - flags.hist_len
         leaf_mat = self.tree.leaf_matrix.T
         num_leaf = np.sum(leaf_mat, axis=0, keepdims=True)
         self.ts_data = self.ts_data / num_leaf
@@ -93,7 +93,7 @@ class Data:
         """
         norm_mat = self.ts_data.copy()
         num_data = self.T - (flags.val_windows + flags.test_windows - 1
-                            ) * flags.test_pred - flags.hist_len
+                            ) * flags.pred_len - flags.hist_len
         norm_mat = norm_mat[:num_data]
         norm_mat = norm_mat / np.sum(norm_mat, axis=0, keepdims=True)
 
@@ -113,11 +113,11 @@ class Data:
 
     def train_gen(self):
         hist_len = flags.hist_len
-        pred_len = flags.train_pred
+        pred_len = flags.pred_len
         tot_len = self.T
 
         num_data = \
-            tot_len - (flags.val_windows + flags.test_windows) * flags.test_pred \
+            tot_len - (flags.val_windows + flags.test_windows) * flags.pred_len \
                 - 2 * flags.hist_len
         perm = np.random.permutation(num_data)
 
@@ -142,15 +142,15 @@ class Data:
     def val_gen(self):
         hist_len = flags.hist_len
         tot_len = self.T
-        pred_len = flags.test_pred
+        pred_len = flags.pred_len
 
         start_idx = \
-            tot_len - (flags.val_windows + flags.test_windows) * flags.test_pred \
+            tot_len - (flags.val_windows + flags.test_windows) * flags.pred_len \
                 - flags.hist_len
-        end_idx = tot_len - (flags.test_windows + 1) * flags.test_pred - flags.hist_len
+        end_idx = tot_len - (flags.test_windows + 1) * flags.pred_len - flags.hist_len
 
         print('Val')
-        print('Data start:', start_idx + flags.hist_len, 'Data end:', end_idx + flags.hist_len + flags.test_pred)
+        print('Data start:', start_idx + flags.hist_len, 'Data end:', end_idx + flags.hist_len + flags.pred_len)
 
         for i in range(start_idx, end_idx+1, pred_len):
             sub_ts = self.ts_data[i:i+hist_len+pred_len]
@@ -165,15 +165,15 @@ class Data:
     def test_gen(self):
         hist_len = flags.hist_len
         tot_len = self.T
-        pred_len = flags.test_pred
+        pred_len = flags.pred_len
 
         start_idx = \
-            tot_len - flags.test_windows * flags.test_pred \
+            tot_len - flags.test_windows * flags.pred_len \
                 - flags.hist_len
-        end_idx = tot_len - flags.test_pred - flags.hist_len
+        end_idx = tot_len - flags.pred_len - flags.hist_len
 
         print('Test')
-        print('Data start:', start_idx + flags.hist_len, 'Data end:', end_idx + flags.hist_len + flags.test_pred)
+        print('Data start:', start_idx + flags.hist_len, 'Data end:', end_idx + flags.hist_len + flags.pred_len)
 
         for i in range(start_idx, end_idx+1, pred_len):
             sub_ts = self.ts_data[i:i+hist_len+pred_len]

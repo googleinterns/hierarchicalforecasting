@@ -7,8 +7,7 @@ flags.DEFINE_integer('train_epochs', 25, 'Number of epochs to train')
 flags.DEFINE_integer('batch_size', None, 'Batch size for the randomly sampled batch')
 
 flags.DEFINE_integer('hist_len', 28, 'Length of the history provided as input')
-flags.DEFINE_integer('train_pred', 7, 'Length of pred len during training')
-flags.DEFINE_integer('test_pred', 7, 'Length of pred len during test/val')
+flags.DEFINE_integer('pred_len', 7, 'Length of pred len during training')
 flags.DEFINE_integer('val_windows', 5, 'Number of validation windows')
 flags.DEFINE_integer('test_windows', 5, 'Number of validation windows')
 
