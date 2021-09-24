@@ -15,6 +15,8 @@ flags.DEFINE_integer('fixed_lstm_hidden', 16,
                     'Number of LSTM hidden units in the local model')
 flags.DEFINE_integer('node_emb_dim', 16,
                     'Dimension of the node embeddings')
+flags.DEFINE_integer('dec_hid', 32,
+                    'Hidden layer size for multi-head decoder')
 flags.DEFINE_integer('nmf_rank', 20,
                     'Dimension of the node embeddings')
 flags.DEFINE_integer('random_seed', None,

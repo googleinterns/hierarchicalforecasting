@@ -1,5 +1,6 @@
 import tensorflow as tf
 import numpy as np
+from tensorflow.python.ops.init_ops_v2 import Initializer
 import global_flags
 import sys
 import pandas as pd
@@ -13,6 +14,28 @@ from tensorflow.keras import layers
 flags = global_flags.FLAGS
 MAX_FEAT_EMB_DIM = 5
 EPS = 1e-7
+
+
+class MultiHeadDense(layers.Layer):
+    def __init__(self, fan_out):
+        super(MultiHeadDense, self).__init__()
+        self.fan_out = fan_out
+
+    def build(self, input_shape):
+        fin = input_shape[-1]  # d
+        fout = self.fan_out
+        bsize = input_shape[0]  # t/2
+        self.ar_w = self.add_weight("ar_w",
+                shape=(bsize, fin, fout),
+                initializer='glorot_uniform')  # t/2 x d x f
+        self.ar_b = self.add_weight("ar_b",
+                shape=(bsize, 1, fout),
+                initializer='zeros')  # t/2 x f
+
+    def call(self, input):
+        output = tf.matmul(input, self.ar_w)  # t/2 x 1 x f
+        output = output + self.ar_b
+        return output
 
 
 class FixedRNN(keras.Model):
@@ -42,8 +65,8 @@ class FixedRNN(keras.Model):
         # self.ar_decoder = layers.LSTM(flags.fixed_lstm_hidden,
         #                     return_sequences=True, time_major=True)
         # self.ar_output = layers.Dense(flags.hist_len, use_bias=True)
-        self.ar_w = None
-        self.ar_b = None
+        self.mh1 = MultiHeadDense(flags.dec_hid)
+        self.mh2 = MultiHeadDense(flags.hist_len)
         
         self.emb_encoder = layers.LSTM(flags.fixed_lstm_hidden,
                             return_state=True, time_major=True)
@@ -53,19 +76,23 @@ class FixedRNN(keras.Model):
 
 
     def multi_head_dense(self, input, output_size):
-        
+        '''
+        input: t/2 x 1 x d
+        output_size: t/2
+        '''
         if self.ar_w is None:
-            fin = input.shape[-1]
+            fin = input.shape[-1]  # d
             fout = output_size
-            bsize = input.shape[0]
+            bsize = input.shape[0]  # t/2
             scale = 1.0 / max(1., (fin + fout) / 2.)
             limit = np.sqrt(3.0 * scale)
             self.ar_w = tf.Variable(
                 np.random.uniform(-limit, limit, size=(bsize, fin, fout)).astype(np.float32),
-                name='ar_w')
+                name='ar_w')  # t/2 x d x f
             self.ar_b = tf.Variable(np.zeros((bsize, fout), dtype=np.float32), name='ar_b')
+                    # t/2 x f
         
-        output = tf.matmul(input, self.ar_w)
+        output = tf.matmul(input, self.ar_w)  # t/2 x 1 x f
         output = tf.squeeze(output, 1) + self.ar_b
         return output
 
@@ -128,7 +155,7 @@ class FixedRNN(keras.Model):
         sw: b
         '''
         feats = self.assemble_feats(feats)  # t x d
-        feats = tf.expand_dims(feats, axis=1)  # t/2 x 1 x d
+        feats = tf.expand_dims(feats, axis=1)  # t x 1 x d
         node_emb = self.get_node_emb(nid)  # b x e
         
         feats_prev = feats[:flags.hist_len]  # t/2 x 1 x d
@@ -142,7 +169,10 @@ class FixedRNN(keras.Model):
         enc = tf.expand_dims(enc, 1)  # t/2 x 1 x h
         enc = tf.concat([feats_futr, enc], axis=-1)  # t/2 x 1 x d
         
-        ar = self.multi_head_dense(enc, flags.hist_len)  # t/2 x t/2
+        ar = self.mh1(enc)  # t/2 x 1 x h
+        ar = tf.nn.tanh(ar)  # t/2 x 1 x h
+        ar = self.mh2(ar)  # t/2 x 1 x t/2
+        ar = tf.squeeze(ar, 1)  # t/2 x t/2
         ar = tf.matmul(ar, y_prev)
 
         # ar = self.ar_decoder(inputs=feats_futr, initial_state=(h, c))  # t/2 x 1 x h
