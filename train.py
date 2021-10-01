@@ -97,7 +97,7 @@ def main(_):
         val_metrics, val_pred = model.eval(data, 'val')
         test_metrics, test_pred = model.eval(data, 'test')
 
-        tracked_loss = val_metrics.loc['all']['wape']
+        tracked_loss = val_metrics.loc['mean']['wape']
         if tracked_loss < best_loss:
             best_loss = tracked_loss
             best_check_path = ckpt_manager.latest_checkpoint

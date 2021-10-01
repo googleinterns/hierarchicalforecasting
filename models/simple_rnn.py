@@ -66,6 +66,8 @@ class FixedRNN(keras.Model):
         #                     return_sequences=True, time_major=True)
         # self.ar_output = layers.Dense(flags.hist_len, use_bias=True)
         self.mh1 = MultiHeadDense(flags.dec_hid)
+        if flags.add_dec_hid:
+            self.mh15 = MultiHeadDense(flags.dec_hid)  # new
         self.mh2 = MultiHeadDense(flags.hist_len)
         
         self.emb_encoder = layers.LSTM(flags.fixed_lstm_hidden,
@@ -170,7 +172,10 @@ class FixedRNN(keras.Model):
         enc = tf.concat([feats_futr, enc], axis=-1)  # t/2 x 1 x d
         
         ar = self.mh1(enc)  # t/2 x 1 x h
-        ar = tf.nn.tanh(ar)  # t/2 x 1 x h
+        ar = tf.nn.relu(ar)  # t/2 x 1 x h
+        if flags.add_dec_hid:
+            ar = self.mh15(ar)  # t/2 x 1 x t/2  # new
+            ar = tf.nn.relu(ar)  # t/2 x 1 x t/2  # new
         ar = self.mh2(ar)  # t/2 x 1 x t/2
         ar = tf.squeeze(ar, 1)  # t/2 x t/2
         ar = tf.matmul(ar, y_prev)
@@ -188,6 +193,9 @@ class FixedRNN(keras.Model):
         ew = tf.nn.tanh(ew)
         ew = tf.matmul(ew, node_emb, transpose_b=True)  # t/2 x b
 
+        if flags.ar_ablation:
+            return ew
+        
         final_output = ar + ew
 
         return final_output
