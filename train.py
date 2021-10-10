@@ -62,12 +62,13 @@ def main(_):
     
     summary = Summary(expt_dir)
 
-    model.eval(data, 'val')
-    model.eval(data, 'test')
+    _, _, decomposed_val = model.eval(data, 'val')
+    _, _, decomposed_test = model.eval(data, 'test')
     
-    # print(eval_df.loc['mean']['wape'])
-    # summary.update(eval_dict)
-    # summary.write(step=step.numpy())
+    with open(os.path.join(expt_dir, 'decomposed.pkl'), 'wb') as fout:
+        pickle.dump((decomposed_val, decomposed_test), fout)
+    
+    sys.exit(1)
 
     best_loss = 1e7
     pat = 0
@@ -94,8 +95,8 @@ def main(_):
         summary.update({"train/learning_rate": optimizer.learning_rate.numpy()})
 
         '''Test metrics'''
-        val_metrics, val_pred = model.eval(data, 'val')
-        test_metrics, test_pred = model.eval(data, 'test')
+        val_metrics, val_pred, _ = model.eval(data, 'val')
+        test_metrics, test_pred, _ = model.eval(data, 'test')
 
         tracked_loss = val_metrics.loc['mean']['wape']
         if tracked_loss < best_loss:

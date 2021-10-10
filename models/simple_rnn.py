@@ -191,14 +191,15 @@ class FixedRNN(keras.Model):
         ew = self.emb_output(ew)  # t/2 x 1 x e
         ew = tf.squeeze(ew, axis=1)  # t/2 x e
         ew = tf.nn.tanh(ew)
-        ew = tf.matmul(ew, node_emb, transpose_b=True)  # t/2 x b
 
-        if flags.ar_ablation:
-            return ew
+        gl = tf.matmul(ew, node_emb, transpose_b=True)  # t/2 x b
+
+        if flags.global_ablation:
+            return ar
         
-        final_output = ar + ew
+        final_output = ar + gl
 
-        return final_output
+        return final_output, (ar, gl, ew)
 
     @tf.function
     def train_step(self, feats, y_obs, z, nid, optimizer):
@@ -209,7 +210,7 @@ class FixedRNN(keras.Model):
         sw: b
         '''
         with tf.GradientTape() as tape:
-            pred = self(feats, y_obs[:flags.hist_len], z, nid)  # t x 1
+            pred, _ = self(feats, y_obs[:flags.hist_len], z, nid)  # t x 1
             mae = tf.abs(pred - y_obs[flags.hist_len:])  # t x 1
             mae = tf.reduce_mean(mae)
             loss = mae + self.emb_regularizer()
@@ -235,6 +236,8 @@ class FixedRNN(keras.Model):
         all_y_true = None
         all_y_pred = None
 
+        decomposed_outputs = []
+
         def set_or_concat(A, B):
             if A is None:
                 return B
@@ -244,7 +247,7 @@ class FixedRNN(keras.Model):
             assert(y_obs.numpy().shape[0] == hist_len + pred_len)
             assert(feats[0].numpy().shape[0] == hist_len + pred_len)
 
-            y_pred = self(feats, y_obs[:hist_len], z, nid)
+            y_pred, decomposed = self(feats, y_obs[:hist_len], z, nid)
             test_loss = tf.abs(y_pred - y_obs[hist_len:])  # t x 1
             test_loss = tf.reduce_mean(test_loss).numpy()
 
@@ -252,11 +255,17 @@ class FixedRNN(keras.Model):
             y_pred = np.clip(y_pred, 0.0, np.inf)
                     # Assuming predictions are positive
 
+            ar, gl, ew = decomposed
+            gl = data.inverse_transform(gl.numpy())
+            ar = ar.numpy() * data.scalar.std
+            ew = ew.numpy()
+
             y_true = y_obs[hist_len:].numpy()
             y_true = data.inverse_transform(y_true)
 
             all_y_pred = set_or_concat(all_y_pred, y_pred)
             all_y_true = set_or_concat(all_y_true, y_true)
+            decomposed_outputs.append((ar, gl, ew))
 
         results_list = []
 
@@ -295,7 +304,7 @@ class FixedRNN(keras.Model):
         print(tabulate(df, headers='keys', tablefmt='psql'))
         print(f'Loss: {test_loss}')
 
-        return df, (all_y_pred, all_y_true)
+        return df, (all_y_pred, all_y_true), decomposed_outputs
 
 
 def mape(y_pred, y_true):
