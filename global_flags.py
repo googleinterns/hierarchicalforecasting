@@ -6,7 +6,9 @@ flags.DEFINE_string('dataset', 'm5', 'The name of the experiment dir')
 flags.DEFINE_boolean('add_dec_hid', True,
                      'Uses an additional hidden layer for the decoder if true')
 flags.DEFINE_boolean('global_ablation', False,
-                     'If True, removes the time varying AR component from the model')
+                     'If True, removes the BD component from the model')
+flags.DEFINE_boolean('ar_ablation', False,
+                     'If True, removes the AR component from the model')
 
 flags.DEFINE_integer('train_epochs', 25, 'Number of epochs to train')
 flags.DEFINE_integer('batch_size', None, 'Batch size for the randomly sampled batch')
